@@ -78,7 +78,6 @@ enum { SrcMapping, SrcUser };
 /* structs */
 /* function declarations */
 /* generic utility functions */
-static void *reallocarray(void *optr, size_t nmemb, size_t size);
 static inline int fast_floor(double x);
 static inline int fast_ceil (double x);
 /* file loading */
@@ -86,15 +85,12 @@ static int  map_file  (SFT_Font *font, const char *filename);
 static void unmap_file(SFT_Font *font);
 static int  init_font (SFT_Font *font);
 /* simple mathematical operations */
-static Point midpoint(Point a, Point b);
 static void transform_points(unsigned int numPts, Point *points, double trf[6]);
 static void clip_points(unsigned int numPts, Point *points, int width, int height);
 /* 'outline' data structure management */
 static int  init_outline(Outline *outl);
 static void free_outline(Outline *outl);
-static int  grow_points (Outline *outl);
 static int  grow_curves (Outline *outl);
-static int  grow_lines  (Outline *outl);
 /* TTF parsing utilities */
 static inline int is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin);
 static void *csearch(const void *key, const void *base,
@@ -122,10 +118,6 @@ static int  decode_contour(uint8_t *flags, uint_fast16_t basePoint, uint_fast16_
 static int  simple_outline(SFT_Font *font, uint_fast32_t offset, unsigned int numContours, Outline *outl);
 static int  compound_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
 static int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
-/* tesselation */
-static int  is_flat(Outline *outl, Curve curve);
-static int  tesselate_curve(Curve curve, Outline *outl);
-static int  tesselate_curves(Outline *outl);
 /* post-processing */
 /*static*/ void post_process(Raster buf, uint8_t *image);
 /* glyph rendering */
@@ -347,7 +339,7 @@ failure:
 /* OpenBSD's reallocarray() standard libary function.
  * A wrapper for realloc() that takes two size args like calloc().
  * Useful because it eliminates common integer overflow bugs. */
-static void *
+/*static*/ void *
 reallocarray(void *optr, size_t nmemb, size_t size)
 {
 	if ((nmemb >= MUL_NO_OVERFLOW || size >= MUL_NO_OVERFLOW) &&
@@ -489,7 +481,7 @@ init_font(SFT_Font *font)
 	return 0;
 }
 
-static Point
+/*static*/ Point
 midpoint(Point a, Point b)
 {
 	return (Point) {
@@ -564,7 +556,7 @@ free_outline(Outline *outl)
 	free(outl->lines);
 }
 
-static int
+/*static*/ int
 grow_points(Outline *outl)
 {
 	void *mem;
@@ -594,22 +586,6 @@ grow_curves(Outline *outl)
 		return -1;
 	outl->capCurves = (uint_least16_t) cap;
 	outl->curves    = mem;
-	return 0;
-}
-
-static int
-grow_lines(Outline *outl)
-{
-	void *mem;
-	uint_fast16_t cap;
-	assert(outl->capLines);
-	if (outl->capLines > UINT16_MAX / 2)
-		return -1;
-	cap = (uint_fast16_t) (2U * outl->capLines);
-	if (!(mem = reallocarray(outl->lines, cap, sizeof *outl->lines)))
-		return -1;
-	outl->capLines = (uint_least16_t) cap;
-	outl->lines    = mem;
 	return 0;
 }
 
@@ -1284,75 +1260,6 @@ decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl
 	} else {
 		return 0;
 	}
-}
-
-/* A heuristic to tell whether a given curve can be approximated closely enough by a line. */
-static int
-is_flat(Outline *outl, Curve curve)
-{
-	const double maxArea2 = 2.0;
-	Point a = outl->points[curve.beg];
-	Point b = outl->points[curve.ctrl];
-	Point c = outl->points[curve.end];
-	Point g = { b.x-a.x, b.y-a.y };
-	Point h = { c.x-a.x, c.y-a.y };
-	double area2 = fabs(g.x*h.y-h.x*g.y);
-	return area2 <= maxArea2;
-}
-
-static int
-tesselate_curve(Curve curve, Outline *outl)
-{
-	/* From my tests I can conclude that this stack barely reaches a top height
-	 * of 4 elements even for the largest font sizes I'm willing to support. And
-	 * as space requirements should only grow logarithmically, I think 10 is
-	 * more than enough. */
-#define STACK_SIZE 10
-	Curve stack[STACK_SIZE];
-	unsigned int top = 0;
-	for (;;) {
-		if (is_flat(outl, curve) || top >= STACK_SIZE) {
-			if (outl->numLines >= outl->capLines && grow_lines(outl) < 0)
-				return -1;
-			outl->lines[outl->numLines++] = (Line) { curve.beg, curve.end };
-			if (top == 0) break;
-			curve = stack[--top];
-		} else {
-			uint_least16_t ctrl0 = outl->numPoints;
-			if (outl->numPoints >= outl->capPoints && grow_points(outl) < 0)
-				return -1;
-			outl->points[ctrl0] = midpoint(outl->points[curve.beg], outl->points[curve.ctrl]);
-			++outl->numPoints;
-
-			uint_least16_t ctrl1 = outl->numPoints;
-			if (outl->numPoints >= outl->capPoints && grow_points(outl) < 0)
-				return -1;
-			outl->points[ctrl1] = midpoint(outl->points[curve.ctrl], outl->points[curve.end]);
-			++outl->numPoints;
-
-			uint_least16_t pivot = outl->numPoints;
-			if (outl->numPoints >= outl->capPoints && grow_points(outl) < 0)
-				return -1;
-			outl->points[pivot] = midpoint(outl->points[ctrl0], outl->points[ctrl1]);
-			++outl->numPoints;
-
-			stack[top++] = (Curve) { curve.beg, pivot, ctrl0 };
-			curve = (Curve) { pivot, curve.end, ctrl1 };
-		}
-	}
-	return 0;
-#undef STACK_SIZE
-}
-
-static int
-tesselate_curves(Outline *outl)
-{
-	unsigned int i;
-	for (i = 0; i < outl->numCurves; ++i) {
-		if (tesselate_curve(outl->curves[i], outl) < 0)
-			return -1;
-	}
-	return 0;
 }
 
 /* Draws a line into the buffer. Uses a custom 2D raycasting algorithm to do so. */

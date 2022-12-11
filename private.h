@@ -48,6 +48,17 @@ struct Raster
 	int   height;
 };
 
+/* generic utility functions */
+/*static*/ void *reallocarray(void *optr, size_t nmemb, size_t size);
+/* simple mathematical operations */
+/*static*/ Point midpoint(Point a, Point b);
+/* 'outline' data structure management */
+/*static*/ int  grow_points (Outline *outl);
+/*static*/ int  grow_lines  (Outline *outl);
+/* tesselation */
+//static int  is_flat(Outline *outl, Curve curve);
+//static int  tesselate_curve(Curve curve, Outline *outl);
+/*static*/ int  tesselate_curves(Outline *outl);
 /* silhouette rasterization */
 /*static*/ void draw_line(Raster buf, Point origin, Point goal);
 /*static*/ void draw_lines(Outline *outl, Raster buf);
