@@ -1,8 +1,8 @@
 # Customize below to fit your system
 
 # compiler and linker
-CC = cc
-LD = cc
+CC = zig cc
+LD = zig cc
 AR = ar
 RANLIB = ranlib
 

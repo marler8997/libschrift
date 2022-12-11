@@ -10,15 +10,11 @@ VERSION=0.10.2
 
 all: libschrift.a demo stress
 
-libschrift.a: schrift.o
-	$(AR) rc $@ schrift.o
-	$(RANLIB) $@
-schrift.o: schrift.h
+libschrift.a: schrift.c schrift.h
+	zig build-lib -static -lc -cflags $(CFLAGS) -- schrift.c
 
-demo: demo.o libschrift.a
-	$(LD) $(EXTRAS_LDFLAGS) $@.o -o $@ -L$(X11LIB) -L. -lX11 -lXrender -lschrift -lm
-demo.o: demo.c schrift.h util/utf8_to_utf32.h
-	$(CC) -c $(EXTRAS_CFLAGS) $(@:.o=.c) -o $@ $(EXTRAS_CPPFLAGS) -I$(X11INC)
+demo: libschrift.a
+	zig build-exe $(EXTRA_CFLAGS) demo.c $(EXTRAS_CPPFLAGS) -I$(X11INC) -lX11 -lXrender -L. -lschrift -lm
 
 stress: stress.o libschrift.a
 	$(LD) $(EXTRAS_LDFLAGS) $@.o -o $@ -L. -lschrift -lm

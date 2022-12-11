@@ -5,6 +5,7 @@
  * Contributed by Andor Badi.
  */
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <X11/Xlib.h>
@@ -30,10 +31,13 @@ static int add_glyph(Display *dpy, GlyphSet glyphset, SFT *sft, unsigned long cp
 		.width  = (mtx.minWidth + 3) & ~3,
 		.height = mtx.minHeight,
 	};
-	char pixels[img.width * img.height];
+	size_t total_len = img.width * img.height;
+	char *pixels = malloc(total_len);
 	img.pixels = pixels;
-	if (sft_render(sft, gid, img) < 0)
+	if (sft_render(sft, gid, img) < 0) {
+		free(pixels);
 		ABORT(cp, "not rendered");
+	}
 
 	XGlyphInfo info = {
 		.x      = (short) -mtx.leftSideBearing,
@@ -46,6 +50,7 @@ static int add_glyph(Display *dpy, GlyphSet glyphset, SFT *sft, unsigned long cp
 	Glyph g = cp;
 	XRenderAddGlyphs(dpy, glyphset, &g, &info, 1,
 		img.pixels, (int) (img.width * img.height));
+	free(pixels);
 
 	return 0;
 }
