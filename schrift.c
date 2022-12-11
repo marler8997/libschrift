@@ -37,6 +37,7 @@
 #endif
 
 #include "schrift.h"
+#include "private.h"
 
 #define FILE_MAGIC_ONE             0x00010000
 #define FILE_MAGIC_TWO             0x74727565
@@ -75,52 +76,6 @@
 enum { SrcMapping, SrcUser };
 
 /* structs */
-typedef struct Point   Point;
-typedef struct Line    Line;
-typedef struct Curve   Curve;
-typedef struct Cell    Cell;
-typedef struct Outline Outline;
-typedef struct Raster  Raster;
-
-struct Point { double x, y; };
-struct Line  { uint_least16_t beg, end; };
-struct Curve { uint_least16_t beg, end, ctrl; };
-struct Cell  { double area, cover; };
-
-struct Outline
-{
-	Point *points;
-	Curve *curves;
-	Line  *lines;
-	uint_least16_t numPoints;
-	uint_least16_t capPoints;
-	uint_least16_t numCurves;
-	uint_least16_t capCurves;
-	uint_least16_t numLines;
-	uint_least16_t capLines;
-};
-
-struct Raster
-{
-	Cell *cells;
-	int   width;
-	int   height;
-};
-
-struct SFT_Font
-{
-	const uint8_t *memory;
-	uint_fast32_t  size;
-#if defined(_WIN32)
-	HANDLE         mapping;
-#endif
-	int            source;
-	
-	uint_least16_t unitsPerEm;
-	int_least16_t  locaFormat;
-	uint_least16_t numLongHmtx;
-};
-
 /* function declarations */
 /* generic utility functions */
 static void *reallocarray(void *optr, size_t nmemb, size_t size);
@@ -175,7 +130,7 @@ static int  tesselate_curves(Outline *outl);
 static void draw_line(Raster buf, Point origin, Point goal);
 static void draw_lines(Outline *outl, Raster buf);
 /* post-processing */
-static void post_process(Raster buf, uint8_t *image);
+/*static*/ void post_process(Raster buf, uint8_t *image);
 /* glyph rendering */
 static int  render_outline(Outline *outl, double transform[6], SFT_Image image);
 
@@ -1497,24 +1452,6 @@ draw_lines(Outline *outl, Raster buf)
 		Point origin = outl->points[line.beg];
 		Point goal   = outl->points[line.end];
 		draw_line(buf, origin, goal);
-	}
-}
-
-/* Integrate the values in the buffer to arrive at the final grayscale image. */
-static void
-post_process(Raster buf, uint8_t *image)
-{
-	Cell cell;
-	double accum = 0.0, value;
-	unsigned int i, num;
-	num = (unsigned int) buf.width * (unsigned int) buf.height;
-	for (i = 0; i < num; ++i) {
-		cell     = buf.cells[i];
-		value    = fabs(accum + cell.area);
-		value    = MIN(value, 1.0);
-		value    = value * 255.0 + 0.5;
-		image[i] = (uint8_t) value;
-		accum   += cell.cover;
 	}
 }
 
