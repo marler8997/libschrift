@@ -38,8 +38,6 @@
 
 #include "schrift.h"
 
-#define SCHRIFT_VERSION "0.10.2"
-
 #define FILE_MAGIC_ONE             0x00010000
 #define FILE_MAGIC_TWO             0x74727565
 
@@ -157,7 +155,7 @@ static int gettable(SFT_Font *font, char tag[4], uint_fast32_t *offset);
 /* codepoint to glyph id translation */
 static int  cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
 static int  cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
-static int  glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
+/*static*/ int  glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /* glyph metrics lookup */
 static int  hor_metrics(SFT_Font *font, uint_fast32_t glyph, int *advanceWidth, int *leftSideBearing);
 static int  glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4]);
@@ -182,12 +180,6 @@ static void post_process(Raster buf, uint8_t *image);
 static int  render_outline(Outline *outl, double transform[6], SFT_Image image);
 
 /* function implementations */
-
-const char *
-sft_version(void)
-{
-	return SCHRIFT_VERSION;
-}
 
 /* Loads a font from a user-supplied memory range. */
 SFT_Font *
@@ -254,12 +246,6 @@ sft_lmetrics(const SFT *sft, SFT_LMetrics *metrics)
 	metrics->descender = geti16(sft->font, hhea + 6) * factor;
 	metrics->lineGap   = geti16(sft->font, hhea + 8) * factor;
 	return 0;
-}
-
-int
-sft_lookup(const SFT *sft, SFT_UChar codepoint, SFT_Glyph *glyph)
-{
-	return glyph_id(sft->font, codepoint, glyph);
 }
 
 int
@@ -884,7 +870,7 @@ cmap_fmt12_13(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph
 }
 
 /* Maps Unicode code points to glyph indices. */
-static int
+int
 glyph_id(SFT_Font *font, SFT_UChar charCode, SFT_Glyph *glyph)
 {
 	uint_fast32_t cmap, entry, table;
