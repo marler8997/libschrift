@@ -126,9 +126,6 @@ static int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, O
 static int  is_flat(Outline *outl, Curve curve);
 static int  tesselate_curve(Curve curve, Outline *outl);
 static int  tesselate_curves(Outline *outl);
-/* silhouette rasterization */
-static void draw_line(Raster buf, Point origin, Point goal);
-static void draw_lines(Outline *outl, Raster buf);
 /* post-processing */
 /*static*/ void post_process(Raster buf, uint8_t *image);
 /* glyph rendering */
@@ -1359,7 +1356,7 @@ tesselate_curves(Outline *outl)
 }
 
 /* Draws a line into the buffer. Uses a custom 2D raycasting algorithm to do so. */
-static void
+/*static*/ void
 draw_line(Raster buf, Point origin, Point goal)
 {
 	Point delta;
@@ -1441,18 +1438,6 @@ draw_line(Raster buf, Point origin, Point goal)
 	xAverage -= (double) pixel.x;
 	cell.area += (1.0 - xAverage) * yDifference;
 	*cptr = cell;
-}
-
-static void
-draw_lines(Outline *outl, Raster buf)
-{
-	unsigned int i;
-	for (i = 0; i < outl->numLines; ++i) {
-		Line  line   = outl->lines[i];
-		Point origin = outl->points[line.beg];
-		Point goal   = outl->points[line.end];
-		draw_line(buf, origin, goal);
-	}
 }
 
 static int

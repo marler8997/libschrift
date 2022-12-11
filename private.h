@@ -47,3 +47,7 @@ struct Raster
 	int   width;
 	int   height;
 };
+
+/* silhouette rasterization */
+/*static*/ void draw_line(Raster buf, Point origin, Point goal);
+/*static*/ void draw_lines(Outline *outl, Raster buf);
