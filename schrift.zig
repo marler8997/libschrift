@@ -442,6 +442,33 @@ export fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_U
     return 0;
 }
 
+export fn cmap_fmt12_13(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, glyph: *c.SFT_Glyph, which: c_int) c_int {
+    glyph.* = 0;
+    // check that the entire header is present
+    if (!is_safe_offset_zig(font, table, 16))
+	return -1;
+
+    const len = getu32(font, table + 4);
+    // A minimal header is 16 bytes
+    if (len < 16)
+	return -1;
+    if (!is_safe_offset_zig(font, table, len))
+	return -1;
+
+    const numEntries = getu32(font, table + 12);
+    var i: c.uint_fast32_t = 0;
+    while (i < numEntries) : (i += 1) {
+	const firstCode = getu32(font, table + (i * 12) + 16);
+	const lastCode = getu32(font, table + (i * 12) + 16 + 4);
+	if (charCode < firstCode or charCode > lastCode)
+	    continue;
+	const glyphOffset = getu32(font, table + (i * 12) + 16 + 8);
+	glyph.* = if (which == 12) (charCode-firstCode) + glyphOffset else glyphOffset;
+	return 0;
+    }
+    return 0;
+}
+
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
 fn is_flat(outline: *c.Outline, curve: c.Curve) c_int {
     const maxArea2: f64 = 2.0;

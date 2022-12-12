@@ -247,46 +247,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 	return 0;
 }
 
-static int
-cmap_fmt12_13(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *glyph, int which)
-{
-	uint32_t len, numEntries;
-	uint_fast32_t i;
-
-	*glyph = 0;
-
-    /* check that the entire header is present */
-	if (!is_safe_offset(font, table, 16))
-		return -1;
-
-	len = getu32(font, table + 4);
-
-	/* A minimal header is 16 bytes */
-	if (len < 16)
-		return -1;
-
-	if (!is_safe_offset(font, table, len))
-		return -1;
-
-	numEntries = getu32(font, table + 12);
-
-	for (i = 0; i < numEntries; ++i) {
-		uint32_t firstCode, lastCode, glyphOffset;
-		firstCode = getu32(font, table + (i * 12) + 16);
-		lastCode = getu32(font, table + (i * 12) + 16 + 4);
-		if (charCode < firstCode || charCode > lastCode)
-			continue;
-		glyphOffset = getu32(font, table + (i * 12) + 16 + 8);
-		if (which == 12)
-			*glyph = (charCode-firstCode) + glyphOffset;
-		else
-			*glyph = glyphOffset;
-		return 0;
-	}
-
-	return 0;
-}
-
 /* Maps Unicode code points to glyph indices. */
 int
 glyph_id(SFT_Font *font, SFT_UChar charCode, SFT_Glyph *glyph)
