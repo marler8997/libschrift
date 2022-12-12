@@ -335,7 +335,7 @@ export fn csearch(
     base: *anyopaque,
     nmemb: usize,
     size: usize,
-    compar: *const fn(*const anyopaque, *const anyopaque) callconv(.C) c_int,
+    compar: *const fn(?*const anyopaque, ?*const anyopaque) callconv(.C) c_int,
 ) ?*anyopaque {
 
     if (nmemb == 0) return null;
@@ -356,12 +356,12 @@ export fn csearch(
 }
 
 // Used as a comparison function for [bc]search().
-export fn cmpu16(a: *const anyopaque, b: *const anyopaque) c_int {
+export fn cmpu16(a: ?*const anyopaque, b: ?*const anyopaque) c_int {
     return c.memcmp(a, b, 2);
 }
 
 // Used as a comparison function for [bc]search().
-export fn cmpu32(a: *const anyopaque, b: *const anyopaque) c_int {
+export fn cmpu32(a: ?*const anyopaque, b: ?*const anyopaque) c_int {
     return c.memcmp(a, b, 4);
 }
 
@@ -384,6 +384,16 @@ fn getu16(font: *c.SFT_Font, offset: c.uint_fast32_t) u16 {
 fn getu32(font: *c.SFT_Font, offset: c.uint_fast32_t) u32 {
     std.debug.assert(offset + 4 <= font.size);
     return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.memory + offset));
+}
+
+export fn gettable(font: *c.SFT_Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
+    // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
+    const numTables = getu16(font, 4);
+    if (!is_safe_offset_zig(font, 12, numTables * 16))
+	return -1;
+    const match = c.bsearch(tag, font.memory + 12, numTables, 16, cmpu32) orelse return -1;
+    offset.* = getu32(font, @ptrToInt(match) - @ptrToInt(font.memory) + 8);
+    return 0;
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.

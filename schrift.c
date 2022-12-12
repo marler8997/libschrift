@@ -241,21 +241,6 @@ getu32(SFT_Font *font, uint_fast32_t offset)
 	return (uint_least32_t) (b3 << 24 | b2 << 16 | b1 << 8 | b0);
 }
 
-/*static*/ int
-gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset)
-{
-	void *match;
-	unsigned int numTables;
-	/* No need to bounds-check access to the first 12 bytes - this gets already checked by init_font(). */
-	numTables = getu16(font, 4);
-	if (!is_safe_offset(font, 12, (uint_fast32_t) numTables * 16))
-		return -1;
-	if (!(match = bsearch(tag, font->memory + 12, numTables, 16, cmpu32)))
-		return -1;
-	*offset = getu32(font, (uint_fast32_t) ((uint8_t *) match - font->memory + 8));
-	return 0;
-}
-
 static int
 cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *glyph)
 {
