@@ -57,6 +57,9 @@ struct Raster
 /* 'outline' data structure management */
 /*static*/ int  grow_points (Outline *outl);
 /*static*/ int  grow_lines  (Outline *outl);
+/* TTF parsing utilities */
+/*static*/ inline int is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin);
+/*static*/ int gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset);
 /* codepoint to glyph id translation */
 int glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /* tesselation */

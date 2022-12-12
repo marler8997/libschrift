@@ -54,6 +54,20 @@ export fn sft_freefont(font: ?*c.SFT_Font) void {
     c.free(f);
 }
 
+export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
+    @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
+    var hhea: c.uint_fast32_t = undefined;
+    if (c.gettable(sft.font, @ptrCast([*c]const u8, "hhea"), &hhea) < 0)
+	return -1;
+    if (!is_safe_offset_zig(sft.font, hhea, 36))
+	return -1;
+    const factor = sft.yScale / @intToFloat(f64, sft.font.*.unitsPerEm);
+    metrics.ascender  = @intToFloat(f64, geti16(sft.font, hhea + 4)) * factor;
+    metrics.descender = @intToFloat(f64, geti16(sft.font, hhea + 6)) * factor;
+    metrics.lineGap   = @intToFloat(f64, geti16(sft.font, hhea + 8)) * factor;
+    return 0;
+}
+
 export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: c.SFT_Glyph) c_int {
     return c.glyph_id(sft.font, codepoint, glyph);
 }
@@ -147,6 +161,37 @@ export fn grow_lines(outline: *c.Outline) c_int {
     outline.capLines = cap;
     outline.lines    = @ptrCast([*]c.Line, @alignCast(@alignOf(c.Line), mem));
     return 0;
+}
+
+export fn is_safe_offset_zig(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32) bool {
+    return if (0 == is_safe_offset(font, offset, margin)) false else true;
+}
+
+export fn is_safe_offset(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32) c_int {
+    if (offset > font.size) return 0;
+    if (font.size - offset < margin) return 0;
+    return 1;
+}
+
+//// Used as a comparison function for [bc]search().
+//export fn cmpu16(a: *align(1) u16, b: *align(1) u16) c_int {
+//    return @booltoInt(a.* == b.*);
+//}
+//export fn cmpu32(a: *align(1) u32, b: *align(1) u32) c_int {
+//    return @booltoInt(a.* == b.*);
+//}
+//
+//export fn getu8(font: *c.SFT_Font, offset: u32) c.uint_least8 {
+//    std.debug.assert(offset + 1 <= font.size);
+//    return @intCast(c.uint_least8, font.memory[offset]);
+//}
+//export fn geti8(font: *c.SFT_Font, offset: u32) c.int_least8 {
+//    return @bitCast(c.int_least8, getU8(font, offset));
+//}
+
+fn geti16(font: *c.SFT_Font, offset: c.uint_fast32_t) i16 {
+    std.debug.assert(offset + 2 <= font.size);
+    return std.mem.readIntBig(i16, @ptrCast(*const [2]u8, font.memory + offset));
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.

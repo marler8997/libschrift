@@ -87,7 +87,6 @@ static int  init_outline(Outline *outl);
 static void free_outline(Outline *outl);
 static int  grow_curves (Outline *outl);
 /* TTF parsing utilities */
-static inline int is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin);
 static void *csearch(const void *key, const void *base,
 	size_t nmemb, size_t size, int (*compar)(const void *, const void *));
 static int  cmpu16(const void *a, const void *b);
@@ -97,7 +96,6 @@ static inline int_least8_t   geti8 (SFT_Font *font, uint_fast32_t offset);
 static inline uint_least16_t getu16(SFT_Font *font, uint_fast32_t offset);
 static inline int_least16_t  geti16(SFT_Font *font, uint_fast32_t offset);
 static inline uint_least32_t getu32(SFT_Font *font, uint_fast32_t offset);
-static int gettable(SFT_Font *font, char tag[4], uint_fast32_t *offset);
 /* codepoint to glyph id translation */
 static int  cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
 static int  cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
@@ -119,23 +117,6 @@ static int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, O
 static int  render_outline(Outline *outl, double transform[6], SFT_Image image);
 
 /* function implementations */
-
-int
-sft_lmetrics(const SFT *sft, SFT_LMetrics *metrics)
-{
-	double factor;
-	uint_fast32_t hhea;
-	memset(metrics, 0, sizeof *metrics);
-	if (gettable(sft->font, "hhea", &hhea) < 0)
-		return -1;
-	if (!is_safe_offset(sft->font, hhea, 36))
-		return -1;
-	factor = sft->yScale / sft->font->unitsPerEm;
-	metrics->ascender  = geti16(sft->font, hhea + 4) * factor;
-	metrics->descender = geti16(sft->font, hhea + 6) * factor;
-	metrics->lineGap   = geti16(sft->font, hhea + 8) * factor;
-	return 0;
-}
 
 int
 sft_gmetrics(const SFT *sft, SFT_Glyph glyph, SFT_GMetrics *metrics)
@@ -429,14 +410,6 @@ grow_curves(Outline *outl)
 	return 0;
 }
 
-static inline int
-is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin)
-{
-	if (offset > font->size) return 0;
-	if (font->size - offset < margin) return 0;
-	return 1;
-}
-
 /* Like bsearch(), but returns the next highest element if key could not be found. */
 static void *
 csearch(const void *key, const void *base,
@@ -509,8 +482,8 @@ getu32(SFT_Font *font, uint_fast32_t offset)
 	return (uint_least32_t) (b3 << 24 | b2 << 16 | b1 << 8 | b0);
 }
 
-static int
-gettable(SFT_Font *font, char tag[4], uint_fast32_t *offset)
+/*static*/ int
+gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset)
 {
 	void *match;
 	unsigned int numTables;
