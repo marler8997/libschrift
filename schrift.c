@@ -79,7 +79,7 @@ static inline int fast_ceil (double x);
 static void transform_points(unsigned int numPts, Point *points, double trf[6]);
 static void clip_points(unsigned int numPts, Point *points, double width, double height);
 /* 'outline' data structure management */
-static int  grow_curves (Outline *outl);
+/*static*/ int  grow_curves (Outline *outl);
 /* TTF parsing utilities */
 static void *csearch(const void *key, const void *base,
 	size_t nmemb, size_t size, int (*compar)(const void *, const void *));
@@ -202,22 +202,6 @@ fast_ceil(double x)
 {
 	int i = (int) x;
 	return i + (i < x);
-}
-
-static int
-grow_curves(Outline *outl)
-{
-	void *mem;
-	uint_fast16_t cap;
-	assert(outl->capCurves);
-	if (outl->capCurves > UINT16_MAX / 2)
-		return -1;
-	cap = (uint_fast16_t) (2U * outl->capCurves);
-	if (!(mem = reallocarray(outl->curves, cap, sizeof *outl->curves)))
-		return -1;
-	outl->capCurves = (uint_least16_t) cap;
-	outl->curves    = mem;
-	return 0;
 }
 
 /* Like bsearch(), but returns the next highest element if key could not be found. */

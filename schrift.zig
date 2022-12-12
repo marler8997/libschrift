@@ -293,25 +293,28 @@ fn free_outline(outl: *c.Outline) void {
     c.free(outl.lines);
 }
 
+fn grow(comptime T: type, cap_ref: *c.uint_least16_t, ptr_ref: *[*c]T) error{OutOfMemory,TooManyPrimitives}!void {
+    std.debug.assert(cap_ref.* > 0);
+    if (cap_ref.* > std.math.maxInt(u16) / 2)
+	return error.TooManyPrimitives;
+    const next_cap = cap_ref.* * 2;
+    const ptr = c.reallocarray(ptr_ref.*, next_cap, @sizeOf(T)) orelse return error.OutOfMemory;
+    cap_ref.* = next_cap;
+    ptr_ref.* = @ptrCast([*c]T, @alignCast(@alignOf(T), ptr));
+}
+
 export fn grow_points(outline: *c.Outline) c_int {
-    std.debug.assert(outline.capPoints > 0);
-    if (outline.capPoints > std.math.maxInt(u16) / 2)
-	return -1;
-    const cap = outline.capPoints * 2;
-    const mem = c.reallocarray(outline.points, cap, @sizeOf(@TypeOf(outline.points[0]))) orelse return -1;
-    outline.capPoints = cap;
-    outline.points    = @ptrCast([*]c.Point, @alignCast(@alignOf(c.Point), mem));
+    grow(c.Point, &outline.capPoints, &outline.points) catch return -1;
+    return 0;
+}
+
+export fn grow_curves(outline: *c.Outline) c_int {
+    grow(c.Curve, &outline.capCurves, &outline.curves) catch return -1;
     return 0;
 }
 
 export fn grow_lines(outline: *c.Outline) c_int {
-    std.debug.assert(outline.capLines > 0);
-    if (outline.capLines > std.math.maxInt(u16) / 2)
-	return -1;
-    const cap = outline.capLines * 2;
-    const mem = c.reallocarray(outline.lines, cap, @sizeOf(@TypeOf(outline.lines[0]))) orelse return -1;
-    outline.capLines = cap;
-    outline.lines    = @ptrCast([*]c.Line, @alignCast(@alignOf(c.Line), mem));
+    grow(c.Line, &outline.capLines, &outline.lines) catch return -1;
     return 0;
 }
 
