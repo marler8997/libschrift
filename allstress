@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -ex
+./stress -f resources/FiraGO-Regular_extended_with_NotoSansEgyptianHieroglyphs-Regular.ttf
+./stress -f resources/FiraGO-Regular.ttf
+./stress -f resources/NotoSansEgyptianHieroglyphs-Regular.ttf
+./stress -f resources/times-new-roman.ttf
+./stress -f resources/Ubuntu-Regular.ttf
+echo Success

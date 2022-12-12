@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -ex
+./demo resources/FiraGO-Regular_extended_with_NotoSansEgyptianHieroglyphs-Regular.ttf
+./demo resources/FiraGO-Regular.ttf
+./demo resources/NotoSansEgyptianHieroglyphs-Regular.ttf
+./demo resources/times-new-roman.ttf
+./demo resources/Ubuntu-Regular.ttf
+echo Success

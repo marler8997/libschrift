@@ -55,7 +55,7 @@ static int add_glyph(Display *dpy, GlyphSet glyphset, SFT *sft, unsigned long cp
 	return 0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
 #define END(m) do { fprintf(stderr, "%s\n", m); return 1; } while (0)
 
@@ -89,7 +89,11 @@ int main()
 		.yScale = 16*s,
 		.flags  = SFT_DOWNWARD_Y,
 	};
-	sft.font = sft_loadfile("resources/FiraGO-Regular_extended_with_NotoSansEgyptianHieroglyphs-Regular.ttf");
+        const char *fontfile = "resources/FiraGO-Regular_extended_with_NotoSansEgyptianHieroglyphs-Regular.ttf";
+        if (argc >= 2) {
+            fontfile = argv[1];
+        }
+	sft.font = sft_loadfile(fontfile);
 	if (sft.font == NULL)
 		END("TTF load failed");
 
