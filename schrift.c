@@ -556,23 +556,6 @@ free_outline(Outline *outl)
 	free(outl->lines);
 }
 
-/*static*/ int
-grow_points(Outline *outl)
-{
-	void *mem;
-	uint_fast16_t cap;
-	assert(outl->capPoints);
-	/* Since we use uint_fast16_t for capacities, we have to be extra careful not to trigger integer overflow. */
-	if (outl->capPoints > UINT16_MAX / 2)
-		return -1;
-	cap = (uint_fast16_t) (2U * outl->capPoints);
-	if (!(mem = reallocarray(outl->points, cap, sizeof *outl->points)))
-		return -1;
-	outl->capPoints = (uint_least16_t) cap;
-	outl->points    = mem;
-	return 0;
-}
-
 static int
 grow_curves(Outline *outl)
 {

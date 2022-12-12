@@ -12,13 +12,23 @@ export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: c.SFT_Gly
     return c.glyph_id(sft.font, codepoint, glyph);
 }
 
+export fn grow_points(outline: *c.Outline) c_int {
+    std.debug.assert(outline.capPoints > 0);
+    if (outline.capPoints > std.math.maxInt(u16) / 2)
+	return -1;
+    const cap = outline.capPoints * 2;
+    const mem = c.reallocarray(outline.points, cap, @sizeOf(@TypeOf(outline.points[0]))) orelse return -1;
+    outline.capPoints = cap;
+    outline.points    = @ptrCast([*]c.Point, @alignCast(@alignOf(c.Point), mem));
+    return 0;
+}
+
 export fn grow_lines(outline: *c.Outline) c_int {
     std.debug.assert(outline.capLines > 0);
     if (outline.capLines > std.math.maxInt(u16) / 2)
 	return -1;
     const cap = outline.capLines * 2;
-    const mem = c.reallocarray(outline.lines, cap, @sizeOf(@TypeOf(outline.lines))) orelse return -1;
-    //outline.capLines = (uint_least16_t) cap;
+    const mem = c.reallocarray(outline.lines, cap, @sizeOf(@TypeOf(outline.lines[0]))) orelse return -1;
     outline.capLines = cap;
     outline.lines    = @ptrCast([*]c.Line, @alignCast(@alignOf(c.Line), mem));
     return 0;
