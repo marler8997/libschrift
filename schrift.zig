@@ -6,6 +6,9 @@ const c = @cImport({
     @cInclude("private.h");
 });
 
+const file_magic_one = 0x00010000;
+const file_magic_two = 0x74727565;
+
 export fn sft_version() [*:0]const u8 {
     return "0.10.2";
 }
@@ -23,10 +26,10 @@ export fn sft_loadmem(mem: [*]u8, size: usize) ?*c.SFT_Font {
     font.memory = mem;
     font.size = @intCast(u32, size);
     font.source = c.SrcUser;
-    if (c.init_font(font) < 0) {
+    init_font(font) catch {
         c.sft_freefont(font);
         return null;
-    }
+    };
     return font;
 }
 
@@ -38,10 +41,10 @@ export fn sft_loadfile(filename: [*:0]const u8) ?*c.SFT_Font {
 	c.free(font);
 	return null;
     };
-    if (c.init_font(font) < 0) {
+    init_font(font) catch {
 	sft_freefont(font);
 	return null;
-    }
+    };
     return font;
 }
 
@@ -203,6 +206,30 @@ fn unmap_file(font: *c.SFT_Font) void {
     }
 }
 
+fn init_font(font: *c.SFT_Font) !void {
+    if (!is_safe_offset_zig(font, 0, 12))
+        return error.InvalidTtfTooSmall;
+
+    // Check for a compatible scalerType (magic number).
+    const scalerType = getu32(font, 0);
+    if (scalerType != file_magic_one and scalerType != file_magic_two)
+	return error.InvalidTtfBadMagic;
+
+    var head: c.uint_fast32_t = undefined;
+    if (c.gettable(font, "head", &head) < 0)
+	return error.InvalidTtfNoHeadTable;
+    if (!is_safe_offset_zig(font, head, 54))
+        return error.InvalidTtfBadHeadTable;
+    font.unitsPerEm = getu16(font, head + 18);
+    font.locaFormat = geti16(font, head + 50);
+    var hhea: c.uint_fast32_t = undefined;
+    if (c.gettable(font, "hhea", &hhea) < 0)
+        return error.InvalidTtfNoHheaTable;
+    if (!is_safe_offset_zig(font, hhea, 36))
+        return error.InvalidTtfBadHheaTable;
+    font.numLongHmtx = getu16(font, hhea + 34);
+}
+
 fn malloc(comptime T: type, count: usize) error{OutOfMemory}![*]T {
     const ptr = c.malloc(count * @sizeOf(T)) orelse return error.OutOfMemory;
     return @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
@@ -278,6 +305,14 @@ export fn is_safe_offset(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32
 fn geti16(font: *c.SFT_Font, offset: c.uint_fast32_t) i16 {
     std.debug.assert(offset + 2 <= font.size);
     return std.mem.readIntBig(i16, @ptrCast(*const [2]u8, font.memory + offset));
+}
+fn getu16(font: *c.SFT_Font, offset: c.uint_fast32_t) u16 {
+    std.debug.assert(offset + 2 <= font.size);
+    return std.mem.readIntBig(u16, @ptrCast(*const [2]u8, font.memory + offset));
+}
+fn getu32(font: *c.SFT_Font, offset: c.uint_fast32_t) u32 {
+    std.debug.assert(offset + 4 <= font.size);
+    return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.memory + offset));
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
