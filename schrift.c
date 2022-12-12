@@ -83,8 +83,6 @@ static inline int fast_ceil (double x);
 static void transform_points(unsigned int numPts, Point *points, double trf[6]);
 static void clip_points(unsigned int numPts, Point *points, int width, int height);
 /* 'outline' data structure management */
-static int  init_outline(Outline *outl);
-static void free_outline(Outline *outl);
 static int  grow_curves (Outline *outl);
 /* TTF parsing utilities */
 static void *csearch(const void *key, const void *base,
@@ -106,11 +104,8 @@ static int  simple_points(SFT_Font *font, uint_fast32_t offset, uint_fast16_t nu
 static int  decode_contour(uint8_t *flags, uint_fast16_t basePoint, uint_fast16_t count, Outline *outl);
 static int  simple_outline(SFT_Font *font, uint_fast32_t offset, unsigned int numContours, Outline *outl);
 static int  compound_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
-static int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
 /* post-processing */
 /*static*/ void post_process(Raster buf, uint8_t *image);
-/* glyph rendering */
-static int  render_outline(Outline *outl, double transform[6], SFT_Image image);
 
 /* function implementations */
 
@@ -178,52 +173,6 @@ sft_kerning(const SFT *sft, SFT_Glyph leftGlyph, SFT_Glyph rightGlyph,
 	kerning->yShift = kerning->yShift / sft->font->unitsPerEm * sft->yScale;
 
 	return 0;
-}
-
-int
-sft_render(const SFT *sft, SFT_Glyph glyph, SFT_Image image)
-{
-	uint_fast32_t outline;
-	double transform[6];
-	int bbox[4];
-	Outline outl;
-
-	if (outline_offset(sft->font, glyph, &outline) < 0)
-		return -1;
-	if (!outline)
-		return 0;
-	if (glyph_bbox(sft, outline, bbox) < 0)
-		return -1;
-	/* Set up the transformation matrix such that
-	 * the transformed bounding boxes min corner lines
-	 * up with the (0, 0) point. */
-	transform[0] = sft->xScale / sft->font->unitsPerEm;
-	transform[1] = 0.0;
-	transform[2] = 0.0;
-	transform[4] = sft->xOffset - bbox[0];
-	if (sft->flags & SFT_DOWNWARD_Y) {
-		transform[3] = -sft->yScale / sft->font->unitsPerEm;
-		transform[5] = bbox[3] - sft->yOffset;
-	} else {
-		transform[3] = +sft->yScale / sft->font->unitsPerEm;
-		transform[5] = sft->yOffset - bbox[1];
-	}
-	
-	memset(&outl, 0, sizeof outl);
-	if (init_outline(&outl) < 0)
-		goto failure;
-
-	if (decode_outline(sft->font, outline, 0, &outl) < 0)
-		goto failure;
-	if (render_outline(&outl, transform, image) < 0)
-		goto failure;
-
-	free_outline(&outl);
-	return 0;
-
-failure:
-	free_outline(&outl);
-	return -1;
 }
 
 /* This is sqrt(SIZE_MAX+1), as s1*s2 <= SIZE_MAX
@@ -333,33 +282,6 @@ clip_points(unsigned int numPts, Point *points, int width, int height)
 			points[i].y = nextafter(height, 0.0);
 		}
 	}
-}
-
-static int
-init_outline(Outline *outl)
-{
-	/* TODO Smaller initial allocations */
-	outl->numPoints = 0;
-	outl->capPoints = 64;
-	if (!(outl->points = malloc(outl->capPoints * sizeof *outl->points)))
-		return -1;
-	outl->numCurves = 0;
-	outl->capCurves = 64;
-	if (!(outl->curves = malloc(outl->capCurves * sizeof *outl->curves)))
-		return -1;
-	outl->numLines = 0;
-	outl->capLines = 64;
-	if (!(outl->lines = malloc(outl->capLines * sizeof *outl->lines)))
-		return -1;
-	return 0;
-}
-
-static void
-free_outline(Outline *outl)
-{
-	free(outl->points);
-	free(outl->curves);
-	free(outl->lines);
 }
 
 static int
@@ -1025,7 +947,7 @@ compound_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *ou
 	return 0;
 }
 
-static int
+/*static*/ int
 decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl)
 {
 	int numContours;
@@ -1128,7 +1050,7 @@ draw_line(Raster buf, Point origin, Point goal)
 	*cptr = cell;
 }
 
-static int
+/*static*/ int
 render_outline(Outline *outl, double transform[6], SFT_Image image)
 {
 	Cell *cells = NULL;

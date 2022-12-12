@@ -67,6 +67,7 @@ int glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /*static*/ int  hor_metrics(SFT_Font *font, uint_fast32_t glyph, int *advanceWidth, int *leftSideBearing);
 /* decoding outlines */
 /*static*/ int  outline_offset(SFT_Font *font, uint_fast32_t glyph, uint_fast32_t *offset);
+/*static*/ int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
 /* tesselation */
 //static int  is_flat(Outline *outl, Curve curve);
 //static int  tesselate_curve(Curve curve, Outline *outl);
@@ -74,3 +75,5 @@ int glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /* silhouette rasterization */
 /*static*/ void draw_line(Raster buf, Point origin, Point goal);
 /*static*/ void draw_lines(Outline *outl, Raster buf);
+/* glyph rendering */
+/*static*/ int  render_outline(Outline *outl, double transform[6], SFT_Image image);

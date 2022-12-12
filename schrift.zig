@@ -97,6 +97,44 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
     return 0;
 }
 
+export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
+    var outline: c.uint_fast32_t = undefined;
+    if (c.outline_offset(sft.font, glyph, &outline) < 0)
+	return -1;
+    if (outline == 0)
+	return 0;
+    var bbox: [4]c_int = undefined;
+    if (c.glyph_bbox(sft, outline, &bbox) < 0)
+	return -1;
+    // Set up the transformation matrix such that
+    // the transformed bounding boxes min corner lines
+    // up with the (0, 0) point.
+    var transform: [6]f64 = undefined;
+    transform[0] = sft.xScale / @intToFloat(f64, sft.font.*.unitsPerEm);
+    transform[1] = 0.0;
+    transform[2] = 0.0;
+    transform[4] = sft.xOffset - @intToFloat(f64, bbox[0]);
+    if ((sft.flags & c.SFT_DOWNWARD_Y) != 0) {
+	transform[3] = -sft.yScale / @intToFloat(f64, sft.font.*.unitsPerEm);
+	transform[5] = @intToFloat(f64, bbox[3]) - sft.yOffset;
+    } else {
+	transform[3] = sft.yScale / @intToFloat(f64, sft.font.*.unitsPerEm);
+	transform[5] = sft.yOffset - @intToFloat(f64, bbox[1]);
+    }
+
+    var outl = std.mem.zeroes(c.Outline);
+    defer free_outline(&outl);
+    init_outline(&outl) catch return -1;
+
+    if (c.decode_outline(sft.font, outline, 0, &outl) < 0)
+        return -1;
+
+    if (c.render_outline(&outl, &transform, image) < 0)
+        return -1;
+
+    return 0;
+}
+
 fn map_file(font: *c.SFT_Font, filename: [*:0]const u8) !void {
     if (builtin.os.tag == .windows) {
         @panic("todo");
@@ -163,6 +201,30 @@ fn unmap_file(font: *c.SFT_Font) void {
 	//std.debug.assert(font.memory != std.os.MAP.FAILED);
 	std.os.munmap(@alignCast(std.mem.page_size, font.memory)[0 .. font.size]);
     }
+}
+
+fn malloc(comptime T: type, count: usize) error{OutOfMemory}![*]T {
+    const ptr = c.malloc(count * @sizeOf(T)) orelse return error.OutOfMemory;
+    return @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
+}
+
+fn init_outline(outl: *c.Outline) error{OutOfMemory}!void {
+    // TODO Smaller initial allocations
+    outl.numPoints = 0;
+    outl.capPoints = 64;
+    outl.points = try malloc(c.Point, outl.capPoints);
+    outl.numCurves = 0;
+    outl.capCurves = 64;
+    outl.curves = try malloc(c.Curve, outl.capCurves);
+    outl.numLines = 0;
+    outl.capLines = 64;
+    outl.lines = try malloc(c.Line, outl.capLines);
+}
+
+fn free_outline(outl: *c.Outline) void {
+    c.free(outl.points);
+    c.free(outl.curves);
+    c.free(outl.lines);
 }
 
 export fn grow_points(outline: *c.Outline) c_int {
