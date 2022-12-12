@@ -171,24 +171,6 @@ sft_kerning(const SFT *sft, SFT_Glyph leftGlyph, SFT_Glyph rightGlyph,
 	return 0;
 }
 
-/* This is sqrt(SIZE_MAX+1), as s1*s2 <= SIZE_MAX
- * if both s1 < MUL_NO_OVERFLOW and s2 < MUL_NO_OVERFLOW */
-#define MUL_NO_OVERFLOW	((size_t)1 << (sizeof(size_t) * 4))
-
-/* OpenBSD's reallocarray() standard libary function.
- * A wrapper for realloc() that takes two size args like calloc().
- * Useful because it eliminates common integer overflow bugs. */
-/*static*/ void *
-reallocarray(void *optr, size_t nmemb, size_t size)
-{
-	if ((nmemb >= MUL_NO_OVERFLOW || size >= MUL_NO_OVERFLOW) &&
-	    nmemb > 0 && SIZE_MAX / nmemb < size) {
-		errno = ENOMEM;
-		return NULL;
-	}
-	return realloc(optr, size * nmemb);
-}
-
 /* TODO maybe we should use long here instead of int. */
 static inline int
 fast_floor(double x)

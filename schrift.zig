@@ -299,7 +299,7 @@ fn grow(comptime T: type, cap_ref: *c.uint_least16_t, ptr_ref: *[*c]T) error{Out
     if (cap_ref.* > std.math.maxInt(u16) / 2)
 	return error.TooManyPrimitives;
     const next_cap = cap_ref.* * 2;
-    const ptr = c.reallocarray(ptr_ref.*, next_cap, @sizeOf(T)) orelse return error.OutOfMemory;
+    const ptr = c.realloc(ptr_ref.*, next_cap * @sizeOf(T)) orelse return error.OutOfMemory;
     cap_ref.* = next_cap;
     ptr_ref.* = @ptrCast([*c]T, @alignCast(@alignOf(T), ptr));
 }
