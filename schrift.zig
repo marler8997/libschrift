@@ -72,6 +72,30 @@ export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: c.SFT_Gly
     return c.glyph_id(sft.font, codepoint, glyph);
 }
 
+export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics) c_int {
+    @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
+
+    var adv: c_int = undefined;
+    var lsb: c_int = undefined;
+    if (c.hor_metrics(sft.font, glyph, &adv, &lsb) < 0)
+	return -1;
+    const xScale = sft.xScale / @intToFloat(f64, sft.font.*.unitsPerEm);
+    metrics.advanceWidth    = @intToFloat(f64, adv) * xScale;
+    metrics.leftSideBearing = @intToFloat(f64, lsb) * xScale + sft.xOffset;
+
+    var outline: c.uint_fast32_t = undefined;
+    if (c.outline_offset(sft.font, glyph, &outline) < 0)
+	return -1;
+    if (outline == 0)
+	return 0;
+    var bbox: [4]c_int = undefined;
+    if (c.glyph_bbox(sft, outline, &bbox) < 0)
+	return -1;
+    metrics.minWidth  = bbox[2] - bbox[0] + 1;
+    metrics.minHeight = bbox[3] - bbox[1] + 1;
+    metrics.yOffset   = if ((sft.flags & c.SFT_DOWNWARD_Y) != 0) -bbox[3] else bbox[1];
+    return 0;
+}
 
 fn map_file(font: *c.SFT_Font, filename: [*:0]const u8) !void {
     if (builtin.os.tag == .windows) {

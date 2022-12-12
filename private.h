@@ -62,6 +62,11 @@ struct Raster
 /*static*/ int gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset);
 /* codepoint to glyph id translation */
 int glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
+/* glyph metrics lookup */
+/*static*/ int  glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4]);
+/*static*/ int  hor_metrics(SFT_Font *font, uint_fast32_t glyph, int *advanceWidth, int *leftSideBearing);
+/* decoding outlines */
+/*static*/ int  outline_offset(SFT_Font *font, uint_fast32_t glyph, uint_fast32_t *offset);
 /* tesselation */
 //static int  is_flat(Outline *outl, Curve curve);
 //static int  tesselate_curve(Curve curve, Outline *outl);

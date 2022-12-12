@@ -100,11 +100,7 @@ static inline uint_least32_t getu32(SFT_Font *font, uint_fast32_t offset);
 static int  cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
 static int  cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
 /*static*/ int  glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
-/* glyph metrics lookup */
-static int  hor_metrics(SFT_Font *font, uint_fast32_t glyph, int *advanceWidth, int *leftSideBearing);
-static int  glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4]);
 /* decoding outlines */
-static int  outline_offset(SFT_Font *font, uint_fast32_t glyph, uint_fast32_t *offset);
 static int  simple_flags(SFT_Font *font, uint_fast32_t *offset, uint_fast16_t numPts, uint8_t *flags);
 static int  simple_points(SFT_Font *font, uint_fast32_t offset, uint_fast16_t numPts, uint8_t *flags, Point *points);
 static int  decode_contour(uint8_t *flags, uint_fast16_t basePoint, uint_fast16_t count, Outline *outl);
@@ -117,34 +113,6 @@ static int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, O
 static int  render_outline(Outline *outl, double transform[6], SFT_Image image);
 
 /* function implementations */
-
-int
-sft_gmetrics(const SFT *sft, SFT_Glyph glyph, SFT_GMetrics *metrics)
-{
-	int adv, lsb;
-	double xScale = sft->xScale / sft->font->unitsPerEm;
-	uint_fast32_t outline;
-	int bbox[4];
-
-	memset(metrics, 0, sizeof *metrics);
-
-	if (hor_metrics(sft->font, glyph, &adv, &lsb) < 0)
-		return -1;
-	metrics->advanceWidth    = adv * xScale;
-	metrics->leftSideBearing = lsb * xScale + sft->xOffset;
-
-	if (outline_offset(sft->font, glyph, &outline) < 0)
-		return -1;
-	if (!outline)
-		return 0;
-	if (glyph_bbox(sft, outline, bbox) < 0)
-		return -1;
-	metrics->minWidth  = bbox[2] - bbox[0] + 1;
-	metrics->minHeight = bbox[3] - bbox[1] + 1;
-	metrics->yOffset   = sft->flags & SFT_DOWNWARD_Y ? -bbox[3] : bbox[1];
-
-	return 0;
-}
 
 int
 sft_kerning(const SFT *sft, SFT_Glyph leftGlyph, SFT_Glyph rightGlyph,
@@ -674,7 +642,7 @@ glyph_id(SFT_Font *font, SFT_UChar charCode, SFT_Glyph *glyph)
 	return -1;
 }
 
-static int
+/*static*/ int
 hor_metrics(SFT_Font *font, SFT_Glyph glyph, int *advanceWidth, int *leftSideBearing)
 {
 	uint_fast32_t hmtx, offset, boundary;
@@ -707,7 +675,7 @@ hor_metrics(SFT_Font *font, SFT_Glyph glyph, int *advanceWidth, int *leftSideBea
 	}
 }
 
-static int
+/*static*/ int
 glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4])
 {
 	double xScale, yScale;
@@ -731,7 +699,7 @@ glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4])
 }
 
 /* Returns the offset into the font that the glyph's outline is stored at. */
-static int
+/*static*/ int
 outline_offset(SFT_Font *font, SFT_Glyph glyph, uint_fast32_t *offset)
 {
 	uint_fast32_t loca, glyf;
