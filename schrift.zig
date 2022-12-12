@@ -1,11 +1,27 @@
 const std = @import("std");
 const c = @cImport({
+    @cInclude("stdlib.h");
     @cInclude("schrift.h");
     @cInclude("private.h");
 });
 
 export fn sft_version() [*:0]const u8 {
     return "0.10.2";
+}
+
+// Loads a font from a user-supplied memory range.
+export fn sft_loadmem(mem: [*]u8, size: usize) ?*c.SFT_Font {
+    if (size > std.math.maxInt(u32)) return null;
+
+    const font = @ptrCast(*c.SFT_Font, @alignCast(@alignOf(c.SFT_Font), c.calloc(1, @sizeOf(c.SFT_Font)) orelse return null));
+    font.memory = mem;
+    font.size = @intCast(u32, size);
+    font.source = c.SrcUser;
+    if (c.init_font(font) < 0) {
+        c.sft_freefont(font);
+        return null;
+    }
+    return font;
 }
 
 export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: c.SFT_Glyph) c_int {

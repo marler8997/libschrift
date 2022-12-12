@@ -1,6 +1,6 @@
 #pragma once
 
-int glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
+enum { SrcMapping, SrcUser };
 
 typedef struct Point   Point;
 typedef struct Line    Line;
@@ -50,11 +50,15 @@ struct Raster
 
 /* generic utility functions */
 /*static*/ void *reallocarray(void *optr, size_t nmemb, size_t size);
+/* file loading */
+/*static*/ int  init_font (SFT_Font *font);
 /* simple mathematical operations */
 /*static*/ Point midpoint(Point a, Point b);
 /* 'outline' data structure management */
 /*static*/ int  grow_points (Outline *outl);
 /*static*/ int  grow_lines  (Outline *outl);
+/* codepoint to glyph id translation */
+int glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /* tesselation */
 //static int  is_flat(Outline *outl, Curve curve);
 //static int  tesselate_curve(Curve curve, Outline *outl);

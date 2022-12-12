@@ -73,8 +73,6 @@
 #define STACK_FREE(var) \
 	if (var != var##_stack_) free(var);
 
-enum { SrcMapping, SrcUser };
-
 /* structs */
 /* function declarations */
 /* generic utility functions */
@@ -83,7 +81,7 @@ static inline int fast_ceil (double x);
 /* file loading */
 static int  map_file  (SFT_Font *font, const char *filename);
 static void unmap_file(SFT_Font *font);
-static int  init_font (SFT_Font *font);
+/*static*/ int  init_font (SFT_Font *font);
 /* simple mathematical operations */
 static void transform_points(unsigned int numPts, Point *points, double trf[6]);
 static void clip_points(unsigned int numPts, Point *points, int width, int height);
@@ -124,27 +122,6 @@ static int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, O
 static int  render_outline(Outline *outl, double transform[6], SFT_Image image);
 
 /* function implementations */
-
-/* Loads a font from a user-supplied memory range. */
-SFT_Font *
-sft_loadmem(const void *mem, size_t size)
-{
-	SFT_Font *font;
-	if (size > UINT32_MAX) {
-		return NULL;
-	}
-	if (!(font = calloc(1, sizeof *font))) {
-		return NULL;
-	}
-	font->memory = mem;
-	font->size   = (uint_fast32_t) size;
-	font->source = SrcUser;
-	if (init_font(font) < 0) {
-		sft_freefont(font);
-		return NULL;
-	}
-	return font;
-}
 
 /* Loads a font from the file system. To do so, it has to map the entire font into memory. */
 SFT_Font *
@@ -453,7 +430,7 @@ unmap_file(SFT_Font *font)
 
 #endif
 
-static int
+/*static*/ int
 init_font(SFT_Font *font)
 {
 	uint_fast32_t scalerType, head, hhea;
