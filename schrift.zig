@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const c = @cImport({
     @cInclude("stdlib.h");
@@ -9,11 +10,16 @@ export fn sft_version() [*:0]const u8 {
     return "0.10.2";
 }
 
+fn allocFont() ?*c.SFT_Font {
+    const ptr = c.calloc(1, @sizeOf(c.SFT_Font)) orelse return null;
+    return @ptrCast(*c.SFT_Font, @alignCast(@alignOf(c.SFT_Font), ptr));
+}
+
 // Loads a font from a user-supplied memory range.
 export fn sft_loadmem(mem: [*]u8, size: usize) ?*c.SFT_Font {
     if (size > std.math.maxInt(u32)) return null;
 
-    const font = @ptrCast(*c.SFT_Font, @alignCast(@alignOf(c.SFT_Font), c.calloc(1, @sizeOf(c.SFT_Font)) orelse return null));
+    const font = allocFont() orelse return null;
     font.memory = mem;
     font.size = @intCast(u32, size);
     font.source = c.SrcUser;
@@ -24,8 +30,101 @@ export fn sft_loadmem(mem: [*]u8, size: usize) ?*c.SFT_Font {
     return font;
 }
 
+// Loads a font from the file system. To do so, it has to map the entire font into memory.
+export fn sft_loadfile(filename: [*:0]const u8) ?*c.SFT_Font {
+    const font = allocFont() orelse return null;
+    map_file(font, filename) catch |err| {
+        std.log.err("map file '{s}' failed with {s}", .{filename, @errorName(err)});
+	c.free(font);
+	return null;
+    };
+    if (c.init_font(font) < 0) {
+	sft_freefont(font);
+	return null;
+    }
+    return font;
+}
+
+export fn sft_freefont(font: ?*c.SFT_Font) void {
+    const f = font orelse return;
+    // Only unmap if we mapped it ourselves.
+    if (f.source == c.SrcMapping) {
+        unmap_file(f);
+    }
+    c.free(f);
+}
+
 export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: c.SFT_Glyph) c_int {
     return c.glyph_id(sft.font, codepoint, glyph);
+}
+
+
+fn map_file(font: *c.SFT_Font, filename: [*:0]const u8) !void {
+    if (builtin.os.tag == .windows) {
+        @panic("todo");
+//	HANDLE file;
+//	DWORD high, low;
+//
+//	font->mapping = NULL;
+//	font->memory  = NULL;
+//
+//	file = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+//	if (file == INVALID_HANDLE_VALUE) {
+//		return -1;
+//	}
+//
+//	low = GetFileSize(file, &high);
+//	if (low == INVALID_FILE_SIZE) {
+//		CloseHandle(file);
+//		return -1;
+//	}
+//
+//	font->size = (size_t)high << (8 * sizeof(DWORD)) | low;
+//
+//	font->mapping = CreateFileMapping(file, NULL, PAGE_READONLY, high, low, NULL);
+//	if (!font->mapping) {
+//		CloseHandle(file);
+//		return -1;
+//	}
+//
+//	CloseHandle(file);
+//
+//	font->memory = MapViewOfFile(font->mapping, FILE_MAP_READ, 0, 0, 0);
+//	if (!font->memory) {
+//		CloseHandle(font->mapping);
+//		font->mapping = NULL;
+//		return -1;
+//	}
+//
+//	return 0;
+    } else {
+        var file = try std.fs.cwd().openFileZ(filename, .{});
+        defer file.close();
+        const file_size = try file.getEndPos();
+        if (file_size > std.math.maxInt(u32))
+            return error.FileTooBig;
+        font.size = @intCast(u32, file_size);
+        const mem = try std.os.mmap(null, font.size, std.os.PROT.READ, std.os.MAP.PRIVATE, file.handle, 0);
+        std.debug.assert(mem.len == font.size);
+        font.memory = mem.ptr;
+    }
+}
+
+fn unmap_file(font: *c.SFT_Font) void {
+    if (builtin.os.tag == .windows) {
+        @panic("todo");
+//	if (font->memory) {
+//	    UnmapViewOfFile(font->memory);
+//	    font->memory = NULL;
+//	}
+//	if (font->mapping) {
+//	    CloseHandle(font->mapping);
+//	    font->mapping = NULL;
+//	}
+    } else {
+	//std.debug.assert(font.memory != std.os.MAP.FAILED);
+	std.os.munmap(@alignCast(std.mem.page_size, font.memory)[0 .. font.size]);
+    }
 }
 
 export fn grow_points(outline: *c.Outline) c_int {

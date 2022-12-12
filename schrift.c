@@ -78,9 +78,6 @@
 /* generic utility functions */
 static inline int fast_floor(double x);
 static inline int fast_ceil (double x);
-/* file loading */
-static int  map_file  (SFT_Font *font, const char *filename);
-static void unmap_file(SFT_Font *font);
 /*static*/ int  init_font (SFT_Font *font);
 /* simple mathematical operations */
 static void transform_points(unsigned int numPts, Point *points, double trf[6]);
@@ -122,35 +119,6 @@ static int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, O
 static int  render_outline(Outline *outl, double transform[6], SFT_Image image);
 
 /* function implementations */
-
-/* Loads a font from the file system. To do so, it has to map the entire font into memory. */
-SFT_Font *
-sft_loadfile(char const *filename)
-{
-	SFT_Font *font;
-	if (!(font = calloc(1, sizeof *font))) {
-		return NULL;
-	}
-	if (map_file(font, filename) < 0) {
-		free(font);
-		return NULL;
-	}
-	if (init_font(font) < 0) {
-		sft_freefont(font);
-		return NULL;
-	}
-	return font;
-}
-
-void
-sft_freefont(SFT_Font *font)
-{
-	if (!font) return;
-	/* Only unmap if we mapped it ourselves. */
-	if (font->source == SrcMapping)
-		unmap_file(font);
-	free(font);
-}
 
 int
 sft_lmetrics(const SFT *sft, SFT_LMetrics *metrics)
@@ -341,94 +309,6 @@ fast_ceil(double x)
 	int i = (int) x;
 	return i + (i < x);
 }
-
-#if defined(_WIN32)
-
-static int
-map_file(SFT_Font *font, const char *filename)
-{
-	HANDLE file;
-	DWORD high, low;
-
-	font->mapping = NULL;
-	font->memory  = NULL;
-
-	file = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-	if (file == INVALID_HANDLE_VALUE) {
-		return -1;
-	}
-
-	low = GetFileSize(file, &high);
-	if (low == INVALID_FILE_SIZE) {
-		CloseHandle(file);
-		return -1;
-	}
-
-	font->size = (size_t)high << (8 * sizeof(DWORD)) | low;
-
-	font->mapping = CreateFileMapping(file, NULL, PAGE_READONLY, high, low, NULL);
-	if (!font->mapping) {
-		CloseHandle(file);
-		return -1;
-	}
-
-	CloseHandle(file);
-
-	font->memory = MapViewOfFile(font->mapping, FILE_MAP_READ, 0, 0, 0);
-	if (!font->memory) {
-		CloseHandle(font->mapping);
-		font->mapping = NULL;
-		return -1;
-	}
-
-	return 0;
-}
-
-static void
-unmap_file(SFT_Font *font)
-{
-	if (font->memory) {
-		UnmapViewOfFile(font->memory);
-		font->memory = NULL;
-	}
-	if (font->mapping) {
-		CloseHandle(font->mapping);
-		font->mapping = NULL;
-	}
-}
-
-#else
-
-static int
-map_file(SFT_Font *font, const char *filename)
-{
-	struct stat info;
-	int fd;
-	font->memory = MAP_FAILED;
-	font->size   = 0;
-	font->source = SrcMapping;
-	if ((fd = open(filename, O_RDONLY)) < 0) {
-		return -1;
-	}
-	if (fstat(fd, &info) < 0) {
-		close(fd);
-		return -1;
-	}
-	/* FIXME do some basic validation on info.st_size maybe - it is signed for example, so it *could* be negative .. */
-	font->memory = mmap(NULL, (size_t) info.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	font->size   = (uint_fast32_t) info.st_size;
-	close(fd);
-	return font->memory == MAP_FAILED ? -1 : 0;
-}
-
-static void
-unmap_file(SFT_Font *font)
-{
-	assert(font->memory != MAP_FAILED);
-	munmap((void *) font->memory, font->size);
-}
-
-#endif
 
 /*static*/ int
 init_font(SFT_Font *font)
