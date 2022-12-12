@@ -73,7 +73,7 @@ export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
     return 0;
 }
 
-export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: c.SFT_Glyph) c_int {
+export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: *c.SFT_Glyph) c_int {
     return c.glyph_id(sft.font, codepoint, glyph);
 }
 
@@ -392,7 +392,7 @@ export fn gettable(font: *c.SFT_Font, tag: *const [4]u8, offset: *c.uint_fast32_
     if (!is_safe_offset_zig(font, 12, numTables * 16))
 	return -1;
     const match = c.bsearch(tag, font.memory + 12, numTables, 16, cmpu32) orelse return -1;
-    offset.* = getu32(font, @ptrToInt(match) - @ptrToInt(font.memory) + 8);
+    offset.* = getu32(font, @intCast(c.uint_fast32_t, @ptrToInt(match) - @ptrToInt(font.memory) + 8));
     return 0;
 }
 
@@ -428,7 +428,8 @@ export fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_U
     const idRangeOffset = getu16(font, idRangeOffsets + segIdxX2);
     if (idRangeOffset == 0) {
 	// Intentional integer under- and overflow.
-	glyph.* = (shortCode + idDelta) & 0xFFFF;
+        // TODO: not sure if this is correct?
+	glyph.* = (@intCast(u32, shortCode) + @intCast(u32, idDelta)) & 0xFFFF;
 	return 0;
     }
     // Calculate offset into glyph array and determine ultimate value.
