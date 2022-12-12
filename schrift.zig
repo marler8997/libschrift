@@ -1,6 +1,7 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const c = @cImport({
+    @cInclude("string.h");
     @cInclude("stdlib.h");
     @cInclude("math.h");
     @cInclude("schrift.h");
@@ -328,14 +329,42 @@ export fn is_safe_offset(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32
     return 1;
 }
 
-//// Used as a comparison function for [bc]search().
-//export fn cmpu16(a: *align(1) u16, b: *align(1) u16) c_int {
-//    return @booltoInt(a.* == b.*);
-//}
-//export fn cmpu32(a: *align(1) u32, b: *align(1) u32) c_int {
-//    return @booltoInt(a.* == b.*);
-//}
-//
+// Like bsearch(), but returns the next highest element if key could not be found.
+export fn csearch(
+    key: *const anyopaque,
+    base: *anyopaque,
+    nmemb: usize,
+    size: usize,
+    compar: *const fn(*const anyopaque, *const anyopaque) callconv(.C) c_int,
+) ?*anyopaque {
+
+    if (nmemb == 0) return null;
+
+    const bytes = @ptrCast([*]u8, base);
+    var low: usize = 0;
+    var high: usize = nmemb - 1;
+    while (low != high) {
+	const mid = low + (high - low) / 2;
+	const sample = bytes + mid * size;
+	if (compar(key, sample) > 0) {
+	    low = mid + 1;
+	} else {
+	    high = mid;
+	}
+    }
+    return bytes + low * size;
+}
+
+// Used as a comparison function for [bc]search().
+export fn cmpu16(a: *const anyopaque, b: *const anyopaque) c_int {
+    return c.memcmp(a, b, 2);
+}
+
+// Used as a comparison function for [bc]search().
+export fn cmpu32(a: *const anyopaque, b: *const anyopaque) c_int {
+    return c.memcmp(a, b, 4);
+}
+
 //export fn getu8(font: *c.SFT_Font, offset: u32) c.uint_least8 {
 //    std.debug.assert(offset + 1 <= font.size);
 //    return @intCast(c.uint_least8, font.memory[offset]);

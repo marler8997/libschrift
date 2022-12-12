@@ -81,10 +81,10 @@ static void clip_points(unsigned int numPts, Point *points, double width, double
 /* 'outline' data structure management */
 /*static*/ int  grow_curves (Outline *outl);
 /* TTF parsing utilities */
-static void *csearch(const void *key, const void *base,
+/*static*/ void *csearch(const void *key, const void *base,
 	size_t nmemb, size_t size, int (*compar)(const void *, const void *));
-static int  cmpu16(const void *a, const void *b);
-static int  cmpu32(const void *a, const void *b);
+/*static*/ int  cmpu16(const void *a, const void *b);
+/*static*/ int  cmpu32(const void *a, const void *b);
 static inline uint_least8_t  getu8 (SFT_Font *font, uint_fast32_t offset);
 static inline int_least8_t   geti8 (SFT_Font *font, uint_fast32_t offset);
 static inline uint_least16_t getu16(SFT_Font *font, uint_fast32_t offset);
@@ -202,41 +202,6 @@ fast_ceil(double x)
 {
 	int i = (int) x;
 	return i + (i < x);
-}
-
-/* Like bsearch(), but returns the next highest element if key could not be found. */
-static void *
-csearch(const void *key, const void *base,
-	size_t nmemb, size_t size,
-	int (*compar)(const void *, const void *))
-{
-	const uint8_t *bytes = base, *sample;
-	size_t low = 0, high = nmemb - 1, mid;
-	if (!nmemb) return NULL;
-	while (low != high) {
-		mid = low + (high - low) / 2;
-		sample = bytes + mid * size;
-		if (compar(key, sample) > 0) {
-			low = mid + 1;
-		} else {
-			high = mid;
-		}
-	}
-	return (uint8_t *) bytes + low * size;
-}
-
-/* Used as a comparison function for [bc]search(). */
-static int
-cmpu16(const void *a, const void *b)
-{
-	return memcmp(a, b, 2);
-}
-
-/* Used as a comparison function for [bc]search(). */
-static int
-cmpu32(const void *a, const void *b)
-{
-	return memcmp(a, b, 4);
 }
 
 static inline uint_least8_t
