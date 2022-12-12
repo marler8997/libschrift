@@ -77,7 +77,7 @@ static inline int fast_floor(double x);
 static inline int fast_ceil (double x);
 /* simple mathematical operations */
 static void transform_points(unsigned int numPts, Point *points, double trf[6]);
-static void clip_points(unsigned int numPts, Point *points, int width, int height);
+static void clip_points(unsigned int numPts, Point *points, double width, double height);
 /* 'outline' data structure management */
 static int  grow_curves (Outline *outl);
 /* TTF parsing utilities */
@@ -202,54 +202,6 @@ fast_ceil(double x)
 {
 	int i = (int) x;
 	return i + (i < x);
-}
-
-/*static*/ Point
-midpoint(Point a, Point b)
-{
-	return (Point) {
-		0.5 * (a.x + b.x),
-		0.5 * (a.y + b.y)
-	};
-}
-
-/* Applies an affine linear transformation matrix to a set of points. */
-static void
-transform_points(unsigned int numPts, Point *points, double trf[6])
-{
-	Point pt;
-	unsigned int i;
-	for (i = 0; i < numPts; ++i) {
-		pt = points[i];
-		points[i] = (Point) {
-			pt.x * trf[0] + pt.y * trf[2] + trf[4],
-			pt.x * trf[1] + pt.y * trf[3] + trf[5]
-		};
-	}
-}
-
-static void
-clip_points(unsigned int numPts, Point *points, int width, int height)
-{
-	Point pt;
-	unsigned int i;
-
-	for (i = 0; i < numPts; ++i) {
-		pt = points[i];
-
-		if (pt.x < 0.0) {
-			points[i].x = 0.0;
-		}
-		if (pt.x >= width) {
-			points[i].x = nextafter(width, 0.0);
-		}
-		if (pt.y < 0.0) {
-			points[i].y = 0.0;
-		}
-		if (pt.y >= height) {
-			points[i].y = nextafter(height, 0.0);
-		}
-	}
 }
 
 static int

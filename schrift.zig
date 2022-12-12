@@ -2,6 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const c = @cImport({
     @cInclude("stdlib.h");
+    @cInclude("math.h");
     @cInclude("schrift.h");
     @cInclude("private.h");
 });
@@ -228,6 +229,44 @@ fn init_font(font: *c.SFT_Font) !void {
     if (!is_safe_offset_zig(font, hhea, 36))
         return error.InvalidTtfBadHheaTable;
     font.numLongHmtx = getu16(font, hhea + 34);
+}
+
+export fn midpoint(a: c.Point, b: c.Point) c.Point {
+    return .{
+	.x = 0.5 * (a.x + b.x),
+	.y = 0.5 * (a.y + b.y),
+    };
+}
+
+// Applies an affine linear transformation matrix to a set of points.
+export fn transform_points(numPts: c_uint, points: [*]c.Point, trf: *const [6]f64) void {
+    var i: c_uint = 0;
+    while (i < numPts) : (i += 1) {
+	const pt = points[i];
+	points[i] = .{
+	    .x = pt.x * trf[0] + pt.y * trf[2] + trf[4],
+	    .y = pt.x * trf[1] + pt.y * trf[3] + trf[5],
+	};
+    }
+}
+
+export fn clip_points(numPts: c_uint, points: [*]c.Point, width: f64, height: f64) void {
+    var i: c_uint = 0;
+    while (i < numPts) : (i += 1) {
+	const pt = points[i];
+	if (pt.x < 0.0) {
+	    points[i].x = 0.0;
+	}
+	if (pt.x >= width) {
+	    points[i].x = c.nextafter(width, 0.0);
+	}
+	if (pt.y < 0.0) {
+	    points[i].y = 0.0;
+	}
+	if (pt.y >= height) {
+	    points[i].y = c.nextafter(height, 0.0);
+	}
+    }
 }
 
 fn malloc(comptime T: type, count: usize) error{OutOfMemory}![*]T {
