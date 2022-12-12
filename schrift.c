@@ -91,7 +91,7 @@ static inline uint_least16_t getu16(SFT_Font *font, uint_fast32_t offset);
 static inline int_least16_t  geti16(SFT_Font *font, uint_fast32_t offset);
 static inline uint_least32_t getu32(SFT_Font *font, uint_fast32_t offset);
 /* codepoint to glyph id translation */
-static int  cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
+/*static*/ int  cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
 static int  cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
 /*static*/ int  glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /* decoding outlines */
@@ -239,55 +239,6 @@ getu32(SFT_Font *font, uint_fast32_t offset)
 	const uint8_t *base = font->memory + offset;
 	uint_least32_t b3 = base[0], b2 = base[1], b1 = base[2], b0 = base[3]; 
 	return (uint_least32_t) (b3 << 24 | b2 << 16 | b1 << 8 | b0);
-}
-
-static int
-cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *glyph)
-{
-	const uint8_t *segPtr;
-	uint_fast32_t segIdxX2;
-	uint_fast32_t endCodes, startCodes, idDeltas, idRangeOffsets, idOffset;
-	uint_fast16_t segCountX2, idRangeOffset, startCode, shortCode, idDelta, id;
-	uint8_t key[2] = { (uint8_t) (charCode >> 8), (uint8_t) charCode };
-	/* cmap format 4 only supports the Unicode BMP. */
-	if (charCode > 0xFFFF) {
-		*glyph = 0;
-		return 0;
-	}
-	shortCode = (uint_fast16_t) charCode;
-	if (!is_safe_offset(font, table, 8))
-		return -1;
-	segCountX2 = getu16(font, table);
-	if ((segCountX2 & 1) || !segCountX2)
-		return -1;
-	/* Find starting positions of the relevant arrays. */
-	endCodes       = table + 8;
-	startCodes     = endCodes + segCountX2 + 2;
-	idDeltas       = startCodes + segCountX2;
-	idRangeOffsets = idDeltas + segCountX2;
-	if (!is_safe_offset(font, idRangeOffsets, segCountX2))
-		return -1;
-	/* Find the segment that contains shortCode by binary searching over
-	 * the highest codes in the segments. */
-	segPtr = csearch(key, font->memory + endCodes, segCountX2 / 2, 2, cmpu16);
-	segIdxX2 = (uint_fast32_t) (segPtr - (font->memory + endCodes));
-	/* Look up segment info from the arrays & short circuit if the spec requires. */
-	if ((startCode = getu16(font, startCodes + segIdxX2)) > shortCode)
-		return 0;
-	idDelta = getu16(font, idDeltas + segIdxX2);
-	if (!(idRangeOffset = getu16(font, idRangeOffsets + segIdxX2))) {
-		/* Intentional integer under- and overflow. */
-		*glyph = (shortCode + idDelta) & 0xFFFF;
-		return 0;
-	}
-	/* Calculate offset into glyph array and determine ultimate value. */
-	idOffset = idRangeOffsets + segIdxX2 + idRangeOffset + 2U * (unsigned int) (shortCode - startCode);
-	if (!is_safe_offset(font, idOffset, 2))
-		return -1;
-	id = getu16(font, idOffset);
-	/* Intentional integer under- and overflow. */
-	*glyph = id ? (id + idDelta) & 0xFFFF : 0;
-	return 0;
 }
 
 static int

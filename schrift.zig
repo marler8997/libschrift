@@ -332,15 +332,15 @@ export fn is_safe_offset(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32
 // Like bsearch(), but returns the next highest element if key could not be found.
 export fn csearch(
     key: *const anyopaque,
-    base: *anyopaque,
+    base: *const anyopaque,
     nmemb: usize,
     size: usize,
     compar: *const fn(?*const anyopaque, ?*const anyopaque) callconv(.C) c_int,
-) ?*anyopaque {
+) ?*const anyopaque {
 
     if (nmemb == 0) return null;
 
-    const bytes = @ptrCast([*]u8, base);
+    const bytes = @ptrCast([*]const u8, base);
     var low: usize = 0;
     var high: usize = nmemb - 1;
     while (low != high) {
@@ -393,6 +393,51 @@ export fn gettable(font: *c.SFT_Font, tag: *const [4]u8, offset: *c.uint_fast32_
 	return -1;
     const match = c.bsearch(tag, font.memory + 12, numTables, 16, cmpu32) orelse return -1;
     offset.* = getu32(font, @ptrToInt(match) - @ptrToInt(font.memory) + 8);
+    return 0;
+}
+
+export fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, glyph: *c.SFT_Glyph) c_int {
+    // cmap format 4 only supports the Unicode BMP.
+    if (charCode > 0xFFFF) {
+	glyph.* = 0;
+	return 0;
+    }
+    const shortCode = @intCast(c.uint_fast16_t, charCode);
+    if (!is_safe_offset_zig(font, table, 8))
+	return -1;
+    const segCountX2 = getu16(font, table);
+    if (((segCountX2 & 1) != 0) or (0 == segCountX2))
+	return -1;
+    // Find starting positions of the relevant arrays.
+    const endCodes       = table + 8;
+    const startCodes     = endCodes + segCountX2 + 2;
+    const idDeltas       = startCodes + segCountX2;
+    const idRangeOffsets = idDeltas + segCountX2;
+    if (!is_safe_offset_zig(font, idRangeOffsets, segCountX2))
+	return -1;
+    // Find the segment that contains shortCode by binary searching over
+    // the highest codes in the segments.
+    const key = [2]u8{ @intCast(u8, charCode >> 8), @intCast(u8, charCode & 0xff) };
+    const segAddr = @ptrToInt(csearch(&key, font.memory + endCodes, segCountX2 / 2, 2, cmpu16));
+    const segIdxX2 = @intCast(c.uint_fast32_t, (segAddr - (@ptrToInt(font.memory) + endCodes)));
+    // Look up segment info from the arrays & short circuit if the spec requires.
+    const startCode = getu16(font, startCodes + segIdxX2);
+    if (startCode > shortCode)
+	return 0;
+    const idDelta = getu16(font, idDeltas + segIdxX2);
+    const idRangeOffset = getu16(font, idRangeOffsets + segIdxX2);
+    if (idRangeOffset == 0) {
+	// Intentional integer under- and overflow.
+	glyph.* = (shortCode + idDelta) & 0xFFFF;
+	return 0;
+    }
+    // Calculate offset into glyph array and determine ultimate value.
+    const idOffset = idRangeOffsets + segIdxX2 + idRangeOffset + 2 * (shortCode - startCode);
+    if (!is_safe_offset_zig(font, idOffset, 2))
+	return -1;
+    const id = getu16(font, idOffset);
+    // Intentional integer under- and overflow.
+    glyph.* = if (id == 0) 0 else ((id + idDelta) & 0xFFFF);
     return 0;
 }
 
