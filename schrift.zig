@@ -82,7 +82,7 @@ export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
     var hhea: c.uint_fast32_t = undefined;
     if (c.gettable(sft.font, @ptrCast([*c]const u8, "hhea"), &hhea) < 0)
 	return -1;
-    if (!is_safe_offset_zig(sft.font, hhea, 36))
+    if (!is_safe_offset(sft.font, hhea, 36))
 	return -1;
     const factor = sft.yScale / @intToFloat(f64, sft.font.*.unitsPerEm);
     metrics.ascender  = @intToFloat(f64, geti16(sft.font, hhea + 4)) * factor;
@@ -221,7 +221,7 @@ fn unmap_file(font: *c.SFT_Font) void {
 }
 
 fn init_font(font: *c.SFT_Font) !void {
-    if (!is_safe_offset_zig(font, 0, 12))
+    if (!is_safe_offset(font, 0, 12))
         return error.InvalidTtfTooSmall;
 
     // Check for a compatible scalerType (magic number).
@@ -232,14 +232,14 @@ fn init_font(font: *c.SFT_Font) !void {
     var head: c.uint_fast32_t = undefined;
     if (c.gettable(font, "head", &head) < 0)
 	return error.InvalidTtfNoHeadTable;
-    if (!is_safe_offset_zig(font, head, 54))
+    if (!is_safe_offset(font, head, 54))
         return error.InvalidTtfBadHeadTable;
     font.unitsPerEm = getu16(font, head + 18);
     font.locaFormat = geti16(font, head + 50);
     var hhea: c.uint_fast32_t = undefined;
     if (c.gettable(font, "hhea", &hhea) < 0)
         return error.InvalidTtfNoHheaTable;
-    if (!is_safe_offset_zig(font, hhea, 36))
+    if (!is_safe_offset(font, hhea, 36))
         return error.InvalidTtfBadHheaTable;
     font.numLongHmtx = getu16(font, hhea + 34);
 }
@@ -326,14 +326,10 @@ export fn grow_lines(outline: *c.Outline) c_int {
     return 0;
 }
 
-export fn is_safe_offset_zig(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32) bool {
-    return if (0 == is_safe_offset(font, offset, margin)) false else true;
-}
-
-export fn is_safe_offset(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32) c_int {
-    if (offset > font.size) return 0;
-    if (font.size - offset < margin) return 0;
-    return 1;
+fn is_safe_offset(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32) bool {
+    if (offset > font.size) return false;
+    if (font.size - offset < margin) return false;
+    return true;
 }
 
 // Like bsearch(), but returns the next highest element if key could not be found.
@@ -395,7 +391,7 @@ fn getu32(font: *c.SFT_Font, offset: usize) u32 {
 export fn gettable(font: *c.SFT_Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
     const numTables = getu16(font, 4);
-    if (!is_safe_offset_zig(font, 12, numTables * 16))
+    if (!is_safe_offset(font, 12, numTables * 16))
 	return -1;
     const match = c.bsearch(tag, font.memory + 12, numTables, 16, cmpu32) orelse return -1;
     offset.* = getu32(font, @intCast(c.uint_fast32_t, @ptrToInt(match) - @ptrToInt(font.memory) + 8));
@@ -408,7 +404,7 @@ fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !
 	return 0;
 
     const shortCode = @intCast(c.uint_fast16_t, charCode);
-    if (!is_safe_offset_zig(font, table, 8))
+    if (!is_safe_offset(font, table, 8))
         return error.InvalidTtfBadCmapTable;
     const segCountX2 = getu16(font, table);
     if (((segCountX2 & 1) != 0) or (0 == segCountX2))
@@ -419,7 +415,7 @@ fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !
     const startCodes     = endCodes + segCountX2 + 2;
     const idDeltas       = startCodes + segCountX2;
     const idRangeOffsets = idDeltas + segCountX2;
-    if (!is_safe_offset_zig(font, idRangeOffsets, segCountX2))
+    if (!is_safe_offset(font, idRangeOffsets, segCountX2))
         return error.InvalidTtfBadCmapTable;
 
     // Find the segment that contains shortCode by binary searching over
@@ -440,7 +436,7 @@ fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !
     }
     // Calculate offset into glyph array and determine ultimate value.
     const idOffset = idRangeOffsets + segIdxX2 + idRangeOffset + 2 * (shortCode - startCode);
-    if (!is_safe_offset_zig(font, idOffset, 2))
+    if (!is_safe_offset(font, idOffset, 2))
         return error.InvalidTtfBadCmapTable;
     const id = getu16(font, idOffset);
     // Intentional integer under- and overflow.
@@ -449,14 +445,14 @@ fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !
 
 fn cmap_fmt12_13(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, which: c_int) !c.SFT_Glyph {
     // check that the entire header is present
-    if (!is_safe_offset_zig(font, table, 16))
+    if (!is_safe_offset(font, table, 16))
         return error.InvalidTtfBadCmapTable;
 
     const len = getu32(font, table + 4);
     // A minimal header is 16 bytes
     if (len < 16)
         return error.InvalidTtfBadCmapTable;
-    if (!is_safe_offset_zig(font, table, len))
+    if (!is_safe_offset(font, table, len))
         return error.InvalidTtfBadCmapTable;
 
     const numEntries = getu32(font, table + 12);
@@ -478,11 +474,11 @@ fn glyph_id(font: *c.SFT_Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
     if (gettable(font, "cmap", &cmap) < 0)
         return error.InvalidTtfNoCmapTable;
 
-    if (!is_safe_offset_zig(font, cmap, 4))
+    if (!is_safe_offset(font, cmap, 4))
         return error.InvalidTtfBadCmapTable;
     const numEntries: u32 = getu16(font, cmap + 2);
 
-    if (!is_safe_offset_zig(font, cmap, 4 + numEntries * 8))
+    if (!is_safe_offset(font, cmap, 4 + numEntries * 8))
         return error.InvalidTtfBadCmapTable;
 
     // First look for a 'full repertoire'/non-BMP map.
@@ -494,7 +490,7 @@ fn glyph_id(font: *c.SFT_Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
 	    // Complete unicode map
 	    if (etype == 0o004 or etype == 0o312) {
 	        const table = cmap + getu32(font, entry + 4);
-	        if (!is_safe_offset_zig(font, table, 8))
+	        if (!is_safe_offset(font, table, 8))
                     return error.InvalidTtfBadCmapTable;
 	        // Dispatch based on cmap format.
 	        const format = getu16(font, table);
@@ -515,7 +511,7 @@ fn glyph_id(font: *c.SFT_Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
 	    // Unicode BMP
 	    if (etype == 0o003 or etype == 0o301) {
 	        const table = cmap + getu32(font, entry + 4);
-	        if (!is_safe_offset_zig(font, table, 6))
+	        if (!is_safe_offset(font, table, 6))
                     return error.InvalidTtfBadCmapTable;
 	        // Dispatch based on cmap format.
 		switch (getu16(font, table)) {
@@ -544,7 +540,7 @@ fn hor_metrics(font: *c.SFT_Font, glyph: c.SFT_Glyph) !HorMetrics {
     if (glyph < font.numLongHmtx) {
 	// glyph is inside long metrics segment.
 	const offset = hmtx + 4 * glyph;
-	if (!is_safe_offset_zig(font, offset, 4))
+	if (!is_safe_offset(font, offset, 4))
             return error.InvalidTtfBadHmtxTable;
         return .{
             .advance_width = getu16(font, offset),
@@ -558,10 +554,10 @@ fn hor_metrics(font: *c.SFT_Font, glyph: c.SFT_Glyph) !HorMetrics {
         return error.InvalidTtfBadHmtxTable;
 
     const width_offset = boundary - 4;
-    if (!is_safe_offset_zig(font, width_offset, 4))
+    if (!is_safe_offset(font, width_offset, 4))
         return error.InvalidTtfBadHmtxTable;
     const bearing_offset = boundary + 2 * (glyph - font.numLongHmtx);
-    if (!is_safe_offset_zig(font, bearing_offset, 2))
+    if (!is_safe_offset(font, bearing_offset, 2))
         return error.InvalidTtfBadHmtxTable;
 
     return .{
@@ -571,7 +567,7 @@ fn hor_metrics(font: *c.SFT_Font, glyph: c.SFT_Glyph) !HorMetrics {
 }
 
 fn glyph_bbox(sft: *c.SFT, outline: c.uint_fast32_t) ![4]c_int {
-    if (!is_safe_offset_zig(sft.font, outline, 10))
+    if (!is_safe_offset(sft.font, outline, 10))
 	return error.InvalidTtfBadOutline;
     const box = [4]i16{
         geti16(sft.font, outline + 2),
@@ -605,7 +601,7 @@ fn outline_offset(font: *c.SFT_Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
     const entry = blk: {
         if (font.locaFormat == 0) {
 	    const base = loca + 2 * glyph;
-	    if (!is_safe_offset_zig(font, base, 4))
+	    if (!is_safe_offset(font, base, 4))
 	        return error.InvalidTtfBadLocaTable;
             break :blk .{
 	        .this = 2 * @intCast(u32, getu16(font, base)),
@@ -614,7 +610,7 @@ fn outline_offset(font: *c.SFT_Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
         }
 
 	const base = loca + 4 * glyph;
-	if (!is_safe_offset_zig(font, base, 8))
+	if (!is_safe_offset(font, base, 8))
 	    return error.InvalidTtfBadLocaTable;
         break :blk .{
 	    .this = getu32(font, base),
@@ -634,12 +630,12 @@ fn simple_flags(font: *c.SFT_Font, offset: c.uint_fast32_t, numPts: c.uint_fast1
 	if (repeat != 0) {
             repeat -= 1;
 	} else {
-	    if (!is_safe_offset_zig(font, off, 1))
+	    if (!is_safe_offset(font, off, 1))
 		return error.InvalidTtfBadOutline;
 	    value = getu8(font, off);
             off += 1;
 	    if ((value & ttf.repeat_flag) != 0) {
-		if (!is_safe_offset_zig(font, off, 1))
+		if (!is_safe_offset(font, off, 1))
 		    return error.InvalidTtfBadOutline;
 		repeat = getu8(font, off);
                 off += 1;
@@ -674,14 +670,14 @@ fn simple_points(
         var i: c.uint_fast16_t = 0;
         while (i < numPts) : (i += 1) {
 	    if ((flags[i] & ttf.x_change_is_small) != 0) {
-	        if (!is_safe_offset_zig(font, off, 1))
+	        if (!is_safe_offset(font, off, 1))
 		    return error.InvalidTtfBadOutline;
 	        const value = getu8(font, off);
                 off += 1;
 	        const is_pos = (flags[i] & ttf.x_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
 	    } else if (0 == (flags[i] & ttf.x_change_is_zero)) {
-	        if (!is_safe_offset_zig(font, off, 2))
+	        if (!is_safe_offset(font, off, 2))
 		    return error.InvalidTtfBadOutline;
 	        accum += geti16(font, off);
 	        off += 2;
@@ -695,14 +691,14 @@ fn simple_points(
         var i: c.uint_fast16_t = 0;
         while (i < numPts) : (i += 1) {
 	    if ((flags[i] & ttf.y_change_is_small) != 0) {
-	        if (!is_safe_offset_zig(font, off, 1))
+	        if (!is_safe_offset(font, off, 1))
 		    return error.InvalidTtfBadOutline;
 	        const value = getu8(font, off);
                 off += 1;
 	        const is_pos = (flags[i] & ttf.y_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
 	    } else if (0 == (flags[i] & ttf.y_change_is_zero)) {
-	        if (!is_safe_offset_zig(font, off, 2))
+	        if (!is_safe_offset(font, off, 2))
 		    return error.InvalidTtfBadOutline;
 	        accum += geti16(font, off);
 	        off += 2;
@@ -827,7 +823,7 @@ fn simple_outline(
     std.debug.assert(numContours > 0);
     const basePoint: c.uint_fast16_t = outl.numPoints;
 
-    if (!is_safe_offset_zig(font, offset_start, numContours * 2 + 2))
+    if (!is_safe_offset(font, offset_start, numContours * 2 + 2))
 	return error.InvalidTtfBadOutline;
     var numPts = getu16(font, offset_start + (numContours - 1) * 2);
     if (numPts >= std.math.maxInt(u16))
@@ -904,7 +900,7 @@ fn compound_outline(
     var offset = offset_start;
     while (true) {
         var local = [_]f64{0} ** 6;
-	if (!is_safe_offset_zig(font, offset, 4))
+	if (!is_safe_offset(font, offset, 4))
             return error.InvalidTtfBadOutline;
 	const flags = getu16(font, offset);
 	const glyph = getu16(font, offset + 2);
@@ -914,32 +910,32 @@ fn compound_outline(
             return error.TtfPointMatchingNotSupported;
 	// Read additional X and Y offsets (in FUnits) of this component.
 	if (0 != (flags & ttf.offsets_are_large)) {
-	    if (!is_safe_offset_zig(font, offset, 4))
+	    if (!is_safe_offset(font, offset, 4))
                 return error.InvalidTtfBadOutline;
 	    local[4] = @intToFloat(f64, geti16(font, offset));
 	    local[5] = @intToFloat(f64, geti16(font, offset + 2));
 	    offset += 4;
 	} else {
-	    if (!is_safe_offset_zig(font, offset, 2))
+	    if (!is_safe_offset(font, offset, 2))
                 return error.InvalidTtfBadOutline;
 	    local[4] = @intToFloat(f64, geti8(font, offset));
 	    local[5] = @intToFloat(f64, geti8(font, offset + 1));
 	    offset += 2;
 	}
 	if (0 != (flags & ttf.got_a_single_scale)) {
-	    if (!is_safe_offset_zig(font, offset, 2))
+	    if (!is_safe_offset(font, offset, 2))
                 return error.InvalidTtfBadOutline;
 	    local[0] = @intToFloat(f64, geti16(font, offset)) / 16384.0;
 	    local[3] = local[0];
 	    offset += 2;
 	} else if (0 != (flags & ttf.got_an_x_and_y_scale)) {
-	    if (!is_safe_offset_zig(font, offset, 4))
+	    if (!is_safe_offset(font, offset, 4))
                 return error.InvalidTtfBadOutline;
 	    local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
 	    local[3] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
 	    offset += 4;
 	} else if (0 != (flags & ttf.got_a_scale_matrix)) {
-	    if (!is_safe_offset_zig(font, offset, 8))
+	    if (!is_safe_offset(font, offset, 8))
                 return error.InvalidTtfBadOutline;
 	    local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
 	    local[1] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
@@ -966,7 +962,7 @@ fn compound_outline(
 }
 
 fn decode_outline(font: *c.SFT_Font, offset: c.uint_fast32_t, recDepth: u8, outl: *c.Outline) !void {
-    if (!is_safe_offset_zig(font, offset, 10))
+    if (!is_safe_offset(font, offset, 10))
 	return error.InvalidTtfBadOutline;
     const numContours = geti16(font, offset);
     if (numContours > 0) {
