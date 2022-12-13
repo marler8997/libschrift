@@ -20,6 +20,13 @@ const ttf = struct {
     pub const x_change_is_positive  = 0x10;
     pub const y_change_is_zero      = 0x20;
     pub const y_change_is_positive  = 0x20;
+
+    pub const offsets_are_large         =  0x001;
+    pub const actual_xy_offsets         =  0x002;
+    pub const got_a_single_scale        =  0x008;
+    pub const there_are_more_components =  0x020;
+    pub const got_an_x_and_y_scale      =  0x040;
+    pub const got_a_scale_matrix        =  0x080;
 };
 
 export fn sft_version() [*:0]const u8 {
@@ -378,10 +385,9 @@ fn getu8(font: *c.SFT_Font, offset: usize) u8 {
     std.debug.assert(offset + 1 <= font.size);
     return font.memory[offset];
 }
-//export fn geti8(font: *c.SFT_Font, offset: u32) c.int_least8 {
-//    return @bitCast(c.int_least8, getU8(font, offset));
-//}
-
+fn geti8(font: *c.SFT_Font, offset: usize) i8 {
+    return @bitCast(i8, getu8(font, offset));
+}
 fn geti16(font: *c.SFT_Font, offset: usize) i16 {
     std.debug.assert(offset + 2 <= font.size);
     return std.mem.readIntBig(i16, @ptrCast(*const [2]u8, font.memory + offset));
@@ -896,6 +902,79 @@ export fn simple_outline(
                 return -1;
 	    beg = endPts[i] + 1;
         }
+    }
+
+    return 0;
+}
+
+export fn compound_outline(font: *c.SFT_Font, offset_start: c.uint_fast32_t, recDepth: c_int, outl: *c.Outline) c_int {
+    // Guard against infinite recursion (compound glyphs that have themselves as component).
+    if (recDepth >= 4)
+	return -1;
+    var offset = offset_start;
+    while (true) {
+        var local = [_]f64{0} ** 6;
+	if (!is_safe_offset_zig(font, offset, 4))
+	    return -1;
+	const flags = getu16(font, offset);
+	const glyph = getu16(font, offset + 2);
+	offset += 4;
+	// We don't implement point matching, and neither does stb_truetype for that matter.
+	if (0 == (flags & ttf.actual_xy_offsets))
+	    return -1;
+	// Read additional X and Y offsets (in FUnits) of this component.
+	if (0 != (flags & ttf.offsets_are_large)) {
+	    if (!is_safe_offset_zig(font, offset, 4))
+		return -1;
+	    local[4] = @intToFloat(f64, geti16(font, offset));
+	    local[5] = @intToFloat(f64, geti16(font, offset + 2));
+	    offset += 4;
+	} else {
+	    if (!is_safe_offset_zig(font, offset, 2))
+		return -1;
+	    local[4] = @intToFloat(f64, geti8(font, offset));
+	    local[5] = @intToFloat(f64, geti8(font, offset + 1));
+	    offset += 2;
+	}
+	if (0 != (flags & ttf.got_a_single_scale)) {
+	    if (!is_safe_offset_zig(font, offset, 2))
+		return -1;
+	    local[0] = @intToFloat(f64, geti16(font, offset)) / 16384.0;
+	    local[3] = local[0];
+	    offset += 2;
+	} else if (0 != (flags & ttf.got_an_x_and_y_scale)) {
+	    if (!is_safe_offset_zig(font, offset, 4))
+		return -1;
+	    local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
+	    local[3] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
+	    offset += 4;
+	} else if (0 != (flags & ttf.got_a_scale_matrix)) {
+	    if (!is_safe_offset_zig(font, offset, 8))
+		return -1;
+	    local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
+	    local[1] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
+	    local[2] = @intToFloat(f64, geti16(font, offset + 4)) / 16384.0;
+	    local[3] = @intToFloat(f64, geti16(font, offset + 6)) / 16384.0;
+	    offset += 8;
+	} else {
+	    local[0] = 1.0;
+	    local[3] = 1.0;
+	}
+	// At this point, Apple's spec more or less tells you to scale the matrix by its own L1 norm.
+	// But stb_truetype scales by the L2 norm. And FreeType2 doesn't scale at all.
+	// Furthermore, Microsoft's spec doesn't even mention anything like this.
+	// It's almost as if nobody ever uses this feature anyway.
+        var outline: c.uint_fast32_t = undefined;
+	if (outline_offset(font, glyph, &outline) < 0)
+	    return -1;
+	if (outline != 0) {
+	    const basePoint = outl.numPoints;
+	    if (c.decode_outline(font, outline, recDepth + 1, outl) < 0)
+	        return -1;
+	    transform_points(outl.numPoints - basePoint, outl.points + basePoint, &local);
+	}
+
+        if (0 == (flags & ttf.there_are_more_components)) break;
     }
 
     return 0;
