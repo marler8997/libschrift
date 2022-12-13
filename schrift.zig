@@ -96,9 +96,7 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
 	return -1;
     if (outline == 0)
 	return 0;
-    var bbox: [4]c_int = undefined;
-    if (c.glyph_bbox(sft, outline, &bbox) < 0)
-	return -1;
+    const bbox = glyph_bbox(sft, outline) catch return -1;
     metrics.minWidth  = bbox[2] - bbox[0] + 1;
     metrics.minHeight = bbox[3] - bbox[1] + 1;
     metrics.yOffset   = if ((sft.flags & c.SFT_DOWNWARD_Y) != 0) -bbox[3] else bbox[1];
@@ -111,9 +109,7 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
 	return -1;
     if (outline == 0)
 	return 0;
-    var bbox: [4]c_int = undefined;
-    if (c.glyph_bbox(sft, outline, &bbox) < 0)
-	return -1;
+    const bbox = glyph_bbox(sft, outline) catch return -1;
     // Set up the transformation matrix such that
     // the transformed bounding boxes min corner lines
     // up with the (0, 0) point.
@@ -564,6 +560,28 @@ fn hor_metrics(font: *c.SFT_Font, glyph: c.SFT_Glyph) !HorMetrics {
     return .{
         .advance_width = getu16(font, width_offset),
 	.left_side_bearing = geti16(font, bearing_offset),
+    };
+}
+
+fn glyph_bbox(sft: *c.SFT, outline: c.uint_fast32_t) ![4]c_int {
+    if (!is_safe_offset_zig(sft.font, outline, 10))
+	return error.InvalidTtfBadOutline;
+    const box = [4]i16{
+        geti16(sft.font, outline + 2),
+        geti16(sft.font, outline + 4),
+        geti16(sft.font, outline + 6),
+        geti16(sft.font, outline + 8),
+    };
+    if (box[2] <= box[0] or box[3] <= box[1])
+	return error.InvalidTtfBadBbox;
+    // Transform the bounding box into SFT coordinate space.
+    const xScale = sft.xScale / @intToFloat(f64, sft.font.*.unitsPerEm);
+    const yScale = sft.yScale / @intToFloat(f64, sft.font.*.unitsPerEm);
+    return [_]c_int {
+        @floatToInt(c_int, @floor(@intToFloat(f64, box[0]) * xScale + sft.xOffset)),
+        @floatToInt(c_int, @floor(@intToFloat(f64, box[1]) * yScale + sft.yOffset)),
+        @floatToInt(c_int, @ceil (@intToFloat(f64, box[2]) * xScale + sft.xOffset)),
+        @floatToInt(c_int, @ceil (@intToFloat(f64, box[3]) * yScale + sft.yOffset)),
     };
 }
 

@@ -243,29 +243,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 	return 0;
 }
 
-/*static*/ int
-glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4])
-{
-	double xScale, yScale;
-	/* Read the bounding box from the font file verbatim. */
-	if (!is_safe_offset(sft->font, outline, 10))
-		return -1;
-	box[0] = geti16(sft->font, outline + 2);
-	box[1] = geti16(sft->font, outline + 4);
-	box[2] = geti16(sft->font, outline + 6);
-	box[3] = geti16(sft->font, outline + 8);
-	if (box[2] <= box[0] || box[3] <= box[1])
-		return -1;
-	/* Transform the bounding box into SFT coordinate space. */
-	xScale = sft->xScale / sft->font->unitsPerEm;
-	yScale = sft->yScale / sft->font->unitsPerEm;
-	box[0] = (int) floor(box[0] * xScale + sft->xOffset);
-	box[1] = (int) floor(box[1] * yScale + sft->yOffset);
-	box[2] = (int) ceil (box[2] * xScale + sft->xOffset);
-	box[3] = (int) ceil (box[3] * yScale + sft->yOffset);
-	return 0;
-}
-
 /* Returns the offset into the font that the glyph's outline is stored at. */
 /*static*/ int
 outline_offset(SFT_Font *font, SFT_Glyph glyph, uint_fast32_t *offset)
