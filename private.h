@@ -60,8 +60,6 @@ struct Raster
 /* TTF parsing utilities */
 /*static*/ inline int is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin);
 /*static*/ int gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset);
-/* codepoint to glyph id translation */
-int glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /* glyph metrics lookup */
 /*static*/ int  glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4]);
 /*static*/ int  hor_metrics(SFT_Font *font, uint_fast32_t glyph, int *advanceWidth, int *leftSideBearing);

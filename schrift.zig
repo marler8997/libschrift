@@ -74,7 +74,13 @@ export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
 }
 
 export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: *c.SFT_Glyph) c_int {
-    return c.glyph_id(sft.font, codepoint, glyph);
+    if (glyph_id(sft.font, codepoint)) |g| {
+        glyph.* = g;
+        return 0;
+    } else |_| {
+        glyph.* = 0;
+        return -1;
+    }
 }
 
 export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics) c_int {
@@ -396,25 +402,26 @@ export fn gettable(font: *c.SFT_Font, tag: *const [4]u8, offset: *c.uint_fast32_
     return 0;
 }
 
-export fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, glyph: *c.SFT_Glyph) c_int {
+fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !c.SFT_Glyph {
     // cmap format 4 only supports the Unicode BMP.
-    if (charCode > 0xFFFF) {
-	glyph.* = 0;
+    if (charCode > 0xFFFF)
 	return 0;
-    }
+
     const shortCode = @intCast(c.uint_fast16_t, charCode);
     if (!is_safe_offset_zig(font, table, 8))
-	return -1;
+        return error.InvalidTtfBadCmapTable;
     const segCountX2 = getu16(font, table);
     if (((segCountX2 & 1) != 0) or (0 == segCountX2))
-	return -1;
+        return error.InvalidTtfBadCmapTable;
+
     // Find starting positions of the relevant arrays.
     const endCodes       = table + 8;
     const startCodes     = endCodes + segCountX2 + 2;
     const idDeltas       = startCodes + segCountX2;
     const idRangeOffsets = idDeltas + segCountX2;
     if (!is_safe_offset_zig(font, idRangeOffsets, segCountX2))
-	return -1;
+        return error.InvalidTtfBadCmapTable;
+
     // Find the segment that contains shortCode by binary searching over
     // the highest codes in the segments.
     const key = [2]u8{ @intCast(u8, charCode >> 8), @intCast(u8, charCode & 0xff) };
@@ -429,31 +436,28 @@ export fn cmap_fmt4(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_U
     if (idRangeOffset == 0) {
 	// Intentional integer under- and overflow.
         // TODO: not sure if this is correct?
-	glyph.* = (@intCast(u32, shortCode) + @intCast(u32, idDelta)) & 0xFFFF;
-	return 0;
+	return @intCast(c.SFT_Glyph, (@intCast(u32, shortCode) + @intCast(u32, idDelta)) & 0xFFFF);
     }
     // Calculate offset into glyph array and determine ultimate value.
     const idOffset = idRangeOffsets + segIdxX2 + idRangeOffset + 2 * (shortCode - startCode);
     if (!is_safe_offset_zig(font, idOffset, 2))
-	return -1;
+        return error.InvalidTtfBadCmapTable;
     const id = getu16(font, idOffset);
     // Intentional integer under- and overflow.
-    glyph.* = if (id == 0) 0 else ((id + idDelta) & 0xFFFF);
-    return 0;
+    return if (id == 0) 0 else @intCast(c.SFT_Glyph, ((@intCast(u32, id) + @intCast(u32, idDelta)) & 0xFFFF));
 }
 
-export fn cmap_fmt12_13(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, glyph: *c.SFT_Glyph, which: c_int) c_int {
-    glyph.* = 0;
+fn cmap_fmt12_13(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, which: c_int) !c.SFT_Glyph {
     // check that the entire header is present
     if (!is_safe_offset_zig(font, table, 16))
-	return -1;
+        return error.InvalidTtfBadCmapTable;
 
     const len = getu32(font, table + 4);
     // A minimal header is 16 bytes
     if (len < 16)
-	return -1;
+        return error.InvalidTtfBadCmapTable;
     if (!is_safe_offset_zig(font, table, len))
-	return -1;
+        return error.InvalidTtfBadCmapTable;
 
     const numEntries = getu32(font, table + 12);
     var i: c.uint_fast32_t = 0;
@@ -463,10 +467,68 @@ export fn cmap_fmt12_13(font: *c.SFT_Font, table: c.uint_fast32_t, charCode: c.S
 	if (charCode < firstCode or charCode > lastCode)
 	    continue;
 	const glyphOffset = getu32(font, table + (i * 12) + 16 + 8);
-	glyph.* = if (which == 12) (charCode-firstCode) + glyphOffset else glyphOffset;
-	return 0;
+	return if (which == 12) (charCode-firstCode) + glyphOffset else glyphOffset;
     }
     return 0;
+}
+
+// Maps Unicode code points to glyph indices.
+fn glyph_id(font: *c.SFT_Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
+    var cmap: c.uint_fast32_t = undefined;
+    if (gettable(font, "cmap", &cmap) < 0)
+        return error.InvalidTtfNoCmapTable;
+
+    if (!is_safe_offset_zig(font, cmap, 4))
+        return error.InvalidTtfBadCmapTable;
+    const numEntries: u32 = getu16(font, cmap + 2);
+
+    if (!is_safe_offset_zig(font, cmap, 4 + numEntries * 8))
+        return error.InvalidTtfBadCmapTable;
+
+    // First look for a 'full repertoire'/non-BMP map.
+    {
+        var idx: usize = 0;
+        while (idx < numEntries) : (idx += 1) {
+	    const entry = cmap + 4 + idx * 8;
+	    const etype = getu16(font, entry) * 0o100 + getu16(font, entry + 2);
+	    // Complete unicode map
+	    if (etype == 0o004 or etype == 0o312) {
+	        const table = cmap + getu32(font, entry + 4);
+	        if (!is_safe_offset_zig(font, table, 8))
+                    return error.InvalidTtfBadCmapTable;
+	        // Dispatch based on cmap format.
+	        const format = getu16(font, table);
+	        switch (format) {
+		    12 => return cmap_fmt12_13(font, table, charCode, 12),
+                    else => return error.InvalidTtfUnsupportedCmapFormat,
+	        }
+	    }
+        }
+    }
+
+    // If no 'full repertoire' cmap was found, try looking for a BMP map.
+    {
+        var idx: usize = 0;
+        while (idx < numEntries) : (idx += 1) {
+	    const entry = cmap + 4 + idx * 8;
+	    const etype = getu16(font, entry) * 0o100 + getu16(font, entry + 2);
+	    // Unicode BMP
+	    if (etype == 0o003 or etype == 0o301) {
+	        const table = cmap + getu32(font, entry + 4);
+	        if (!is_safe_offset_zig(font, table, 6))
+                    return error.InvalidTtfBadCmapTable;
+	        // Dispatch based on cmap format.
+		switch (getu16(font, table)) {
+                    4 => return cmap_fmt4(font, table + 6, charCode),
+                    //6 => return cmap_fmt6(font, table + 6, charCode, glyph),
+                    6 => @panic("todo"),
+                    else => return error.InvalidTtfUnsupportedCmapFormat,
+	        }
+	    }
+        }
+    }
+
+    return error.UnsupportedCharCode; // I guess?
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.

@@ -90,10 +90,6 @@ static inline int_least8_t   geti8 (SFT_Font *font, uint_fast32_t offset);
 static inline uint_least16_t getu16(SFT_Font *font, uint_fast32_t offset);
 static inline int_least16_t  geti16(SFT_Font *font, uint_fast32_t offset);
 static inline uint_least32_t getu32(SFT_Font *font, uint_fast32_t offset);
-/* codepoint to glyph id translation */
-/*static*/ int  cmap_fmt4(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
-static int  cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, uint_fast32_t *glyph);
-/*static*/ int  glyph_id(SFT_Font *font, SFT_UChar charCode, uint_fast32_t *glyph);
 /* decoding outlines */
 static int  simple_flags(SFT_Font *font, uint_fast32_t *offset, uint_fast16_t numPts, uint8_t *flags);
 static int  simple_points(SFT_Font *font, uint_fast32_t offset, uint_fast16_t numPts, uint8_t *flags, Point *points);
@@ -245,70 +241,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 		return -1;
 	*glyph = getu16(font, table + 4 + 2 * charCode);
 	return 0;
-}
-
-/* Maps Unicode code points to glyph indices. */
-int
-glyph_id(SFT_Font *font, SFT_UChar charCode, SFT_Glyph *glyph)
-{
-	uint_fast32_t cmap, entry, table;
-	unsigned int idx, numEntries;
-	int type, format;
-	
-	*glyph = 0;
-
-	if (gettable(font, "cmap", &cmap) < 0)
-		return -1;
-
-	if (!is_safe_offset(font, cmap, 4))
-		return -1;
-	numEntries = getu16(font, cmap + 2);
-
-	if (!is_safe_offset(font, cmap, 4 + numEntries * 8))
-		return -1;
-
-	/* First look for a 'full repertoire'/non-BMP map. */
-	for (idx = 0; idx < numEntries; ++idx) {
-		entry = cmap + 4 + idx * 8;
-		type = getu16(font, entry) * 0100 + getu16(font, entry + 2);
-		/* Complete unicode map */
-		if (type == 0004 || type == 0312) {
-			table = cmap + getu32(font, entry + 4);
-			if (!is_safe_offset(font, table, 8))
-				return -1;
-			/* Dispatch based on cmap format. */
-			format = getu16(font, table);
-			switch (format) {
-			case 12:
-				return cmap_fmt12_13(font, table, charCode, glyph, 12);
-			default:
-				return -1;
-			}
-		}
-	}
-
-	/* If no 'full repertoire' cmap was found, try looking for a BMP map. */
-	for (idx = 0; idx < numEntries; ++idx) {
-		entry = cmap + 4 + idx * 8;
-		type = getu16(font, entry) * 0100 + getu16(font, entry + 2);
-		/* Unicode BMP */
-		if (type == 0003 || type == 0301) {
-			table = cmap + getu32(font, entry + 4);
-			if (!is_safe_offset(font, table, 6))
-				return -1;
-			/* Dispatch based on cmap format. */
-			switch (getu16(font, table)) {
-			case 4:
-				return cmap_fmt4(font, table + 6, charCode, glyph);
-			case 6:
-				return cmap_fmt6(font, table + 6, charCode, glyph);
-			default:
-				return -1;
-			}
-		}
-	}
-
-	return -1;
 }
 
 /*static*/ int
