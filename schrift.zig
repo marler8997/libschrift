@@ -353,19 +353,25 @@ fn grow(comptime T: type, cap_ref: *usize, ptr_ref: *[*]T) error{OutOfMemory,Too
     ptr_ref.* = @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
 }
 
-fn grow_points(outline: *Outline) c_int {
-    grow(Point, &outline.points.capacity, &outline.points.items.ptr) catch return -1;
-    return 0;
+fn grow_points(outline: *Outline) error{OutOfMemory,TooManyPoints}!void {
+    grow(Point, &outline.points.capacity, &outline.points.items.ptr) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TooManyPrimitives => return error.TooManyPoints,
+    };
 }
 
-fn grow_curves(outline: *Outline) c_int {
-    grow(Curve, &outline.curves.capacity, &outline.curves.items.ptr) catch return -1;
-    return 0;
+fn grow_curves(outline: *Outline) error{OutOfMemory,TooManyCurves}!void {
+    grow(Curve, &outline.curves.capacity, &outline.curves.items.ptr) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TooManyPrimitives => return error.TooManyCurves,
+    };
 }
 
-fn grow_lines(outline: *Outline) c_int {
-    grow(Line, &outline.lines.capacity, &outline.lines.items.ptr) catch return -1;
-    return 0;
+fn grow_lines(outline: *Outline) error{OutOfMemory,TooManyLines}!void {
+    grow(Line, &outline.lines.capacity, &outline.lines.items.ptr) catch  |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TooManyPrimitives => return error.TooManyLines,
+    };
 }
 
 fn is_safe_offset(font: *Font, offset: usize, margin: u32) bool {
@@ -806,8 +812,8 @@ fn decode_contour(
 	    break :blk @intCast(c.uint_least16_t, basePoint + count);
         }
 
-	if (outl.points.items.len >= outl.points.capacity and grow_points(outl) < 0)
-	    return error.InvalidTtfBadOutline;
+	if (outl.points.items.len >= outl.points.capacity)
+            try grow_points(outl);
 
 	outl.points.items.ptr[outl.points.items.len] = midpoint(
 	    outl.points.items.ptr[basePoint],
@@ -824,13 +830,13 @@ fn decode_contour(
 	const cur = @intCast(c.uint_least16_t, basePoint + i);
 	if (0 != (flags[i] & ttf.point_is_on_curve)) {
 	    if (opt_ctrl) |ctrl| {
-		if (outl.curves.items.len >= outl.curves.capacity and grow_curves(outl) < 0)
-	            return error.InvalidTtfBadOutline;
+		if (outl.curves.items.len >= outl.curves.capacity)
+                    try grow_curves(outl);
 		outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = cur, .ctrl = ctrl };
                 outl.curves.items.len += 1;
 	    } else {
-		if (outl.lines.items.len >= outl.lines.capacity and grow_lines(outl) < 0)
-	            return error.InvalidTtfBadOutline;
+		if (outl.lines.items.len >= outl.lines.capacity)
+                    try grow_lines(outl);
 		outl.lines.items.ptr[outl.lines.items.len] = Line{ .beg = beg, .end = cur };
                 outl.lines.items.len += 1;
 	    }
@@ -839,13 +845,13 @@ fn decode_contour(
 	} else {
 	    if (opt_ctrl) |ctrl| {
 		const center: c.uint_least16_t = @intCast(c.uint_least16_t, outl.points.items.len);
-		if (outl.points.items.len >= outl.points.capacity and grow_points(outl) < 0)
-	            return error.InvalidTtfBadOutline;
+		if (outl.points.items.len >= outl.points.capacity)
+                    try grow_points(outl);
 		outl.points.items.ptr[center] = midpoint(outl.points.items.ptr[ctrl], outl.points.items.ptr[cur]);
                 outl.points.items.len += 1;
 
-		if (outl.curves.items.len >= outl.curves.capacity and grow_curves(outl) < 0)
-	            return error.InvalidTtfBadOutline;
+		if (outl.curves.items.len >= outl.curves.capacity)
+                    try grow_curves(outl);
 		outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = center, .ctrl = ctrl };
                 outl.curves.items.len += 1;
 
@@ -855,13 +861,13 @@ fn decode_contour(
 	}
     }
     if (opt_ctrl) |ctrl| {
-	if (outl.curves.items.len >= outl.curves.capacity and grow_curves(outl) < 0)
-	    return error.InvalidTtfBadOutline;
+	if (outl.curves.items.len >= outl.curves.capacity)
+            try grow_curves(outl);
 	outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = looseEnd, .ctrl = ctrl };
         outl.curves.items.len += 1;
     } else {
-	if (outl.lines.items.len >= outl.lines.capacity and grow_lines(outl) < 0)
-	    return error.InvalidTtfBadOutline;
+	if (outl.lines.items.len >= outl.lines.capacity)
+            try grow_lines(outl);
 	outl.lines.items.ptr[outl.lines.items.len] = Line{ .beg = beg, .end = looseEnd };
         outl.lines.items.len += 1;
     }
@@ -905,8 +911,7 @@ fn simple_outline(
 
     // TODO: this should be a single realloc
     while (outl.points.capacity < basePoint + numPts) {
-	if (grow_points(outl) < 0)
-	    return error.InvalidTtfBadOutline;
+	try grow_points(outl);
     }
 
     // TODO: the following commented line should work but the zig compiler
@@ -1060,7 +1065,7 @@ fn is_flat_zig(outline: *Outline, curve: Curve) bool {
     return is_flat(outline, curve) != 0;
 }
 
-fn tesselate_curve(curve_in: Curve, outline: *Outline) c_int {
+fn tesselate_curve(curve_in: Curve, outline: *Outline) !void {
     // From my tests I can conclude that this stack barely reaches a top height
     // of 4 elements even for the largest font sizes I'm willing to support. And
     // as space requirements should only grow logarithmically, I think 10 is
@@ -1071,8 +1076,8 @@ fn tesselate_curve(curve_in: Curve, outline: *Outline) c_int {
     var curve = curve_in;
     while (true) {
 	if (is_flat_zig(outline, curve) or top >= STACK_SIZE) {
-	    if (outline.lines.items.len >= outline.lines.capacity and grow_lines(outline) < 0)
-		return -1;
+	    if (outline.lines.items.len >= outline.lines.capacity)
+                try grow_lines(outline);
 	    outline.lines.items.ptr[outline.lines.items.len] = .{ .beg = curve.beg, .end = curve.end };
             outline.lines.items.len += 1;
 	    if (top == 0) break;
@@ -1080,20 +1085,20 @@ fn tesselate_curve(curve_in: Curve, outline: *Outline) c_int {
 	    curve = stack[top];
 	} else {
 	    const ctrl0 = @intCast(c.uint_least16_t, outline.points.items.len);
-	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
-		return -1;
+	    if (outline.points.items.len >= outline.points.capacity)
+                try grow_points(outline);
 	    outline.points.items.ptr[ctrl0] = midpoint(outline.points.items.ptr[curve.beg], outline.points.items.ptr[curve.ctrl]);
             outline.points.items.len += 1;
 
 	    const ctrl1 = @intCast(c.uint_least16_t, outline.points.items.len);
-	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
-		return -1;
+	    if (outline.points.items.len >= outline.points.capacity)
+                try grow_points(outline);
 	    outline.points.items.ptr[ctrl1] = midpoint(outline.points.items.ptr[curve.ctrl], outline.points.items.ptr[curve.end]);
             outline.points.items.len += 1;
 
 	    const pivot = @intCast(c.uint_least16_t, outline.points.items.len);
-	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
-		return -1;
+	    if (outline.points.items.len >= outline.points.capacity)
+                try grow_points(outline);
 	    outline.points.items.ptr[pivot] = midpoint(outline.points.items.ptr[ctrl0], outline.points.items.ptr[ctrl1]);
             outline.points.items.len += 1;
 
@@ -1102,16 +1107,6 @@ fn tesselate_curve(curve_in: Curve, outline: *Outline) c_int {
 	    curve = .{ .beg = pivot, .end = curve.end, .ctrl = ctrl1 };
 	}
     }
-    return 0;
-}
-
-fn tesselate_curves(outline: *Outline) c_int {
-    var i: usize = 0;
-    while (i < outline.curves.items.len) : (i += 1) {
-        if (tesselate_curve(outline.curves.items.ptr[i], outline) < 0)
-            return -1;
-    }
-    return 0;
 }
 
 fn sign(x: f64) i2 {
@@ -1237,8 +1232,12 @@ fn render_outline(outl: *Outline, transform: *const [6]f64, image: c.SFT_Image) 
     transform_points(outl.points.items.ptr[0 .. outl.points.items.len], transform);
     clip_points(outl.points.items.ptr[0 .. outl.points.items.len], @intToFloat(f64, image.width), @intToFloat(f64, image.height));
 
-    if (tesselate_curves(outl) < 0)
-	return error.SomethingFailed; // TODO: propagate correct error
+    {
+        var i: usize = 0;
+        while (i < outl.curves.items.len) : (i += 1) {
+            try tesselate_curve(outl.curves.items.ptr[i], outl);
+        }
+    }
 
     const numPixels = @intCast(usize, image.width) * @intCast(usize, image.height);
     // TODO: the following commented line should work but the zig compiler
