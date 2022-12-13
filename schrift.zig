@@ -7,9 +7,7 @@ const c = @cImport({
 });
 
 const Font = struct {
-    memory: [*]u8,
-    // TODO: make this a usize
-    size: c.uint_fast32_t,
+    mem: []u8,
     mapping: if (builtin.os.tag == .windows) ?std.os.windows.HANDLE else void,
     source: enum {
         mapped_file,
@@ -88,8 +86,7 @@ export fn sft_loadmem(mem: [*]u8, size: usize) ?*c.SFT_Font {
     if (size > std.math.maxInt(u32)) return null;
 
     const font = allocFont() catch return null;
-    font.memory = mem;
-    font.size = @intCast(u32, size);
+    font.mem = mem[0 .. size];
     font.source = .user_supplied_memory;
     init_font(font) catch {
         c.sft_freefont(font.toC());
@@ -225,15 +222,13 @@ fn map_file(font: *Font, filename: [*:0]const u8) !void {
     var file = try std.fs.cwd().openFileZ(filename, .{});
     defer file.close();
     const file_size = try file.getEndPos();
-    if (file_size > std.math.maxInt(u32))
-        return error.FileTooBig;
-    font.size = @intCast(u32, file_size);
     if (builtin.os.tag == .windows) {
         font.mapping = win32.CreateFileMappingW(
             file.handle,
             null,
             win32.PAGE_READONLY,
-            0, font.size,
+            @intCast(u32, 0xffffffff & (file_size >> 32)),
+            @intCast(u32, 0xffffffff & (file_size)),
             null,
         ) orelse switch (std.os.windows.kernel32.GetLastError()) {
             //.ACCESS_DENIED => return error.PermissionDenied,
@@ -243,7 +238,7 @@ fn map_file(font: *Font, filename: [*:0]const u8) !void {
             std.os.windows.CloseHandle(font.mapping.?);
             font.mapping = null;
         }
-        font.memory = win32.MapViewOfFile(
+        const ptr = win32.MapViewOfFile(
             font.mapping.?,
             win32.FILE_MAP_READ,
             0, 0, null,
@@ -251,10 +246,10 @@ fn map_file(font: *Font, filename: [*:0]const u8) !void {
             //.ACCESS_DENIED => return error.PermissionDenied,
             else => |err| return std.os.windows.unexpectedError(err),
         };
+        font.mem = ptr[0 .. file_size];
     } else {
-        const mem = try std.os.mmap(null, font.size, std.os.PROT.READ, std.os.MAP.PRIVATE, file.handle, 0);
-        std.debug.assert(mem.len == font.size);
-        font.memory = mem.ptr;
+        font.mem = try std.os.mmap(null, file_size, std.os.PROT.READ, std.os.MAP.PRIVATE, file.handle, 0);
+        std.debug.assert(font.mem.len == file_size);
     }
 }
 
@@ -264,7 +259,7 @@ fn unmap_file(font: *Font) void {
         std.os.windows.CloseHandle(font.mapping.?);
     } else {
 	//std.debug.assert(font.memory != std.os.MAP.FAILED);
-	std.os.munmap(@alignCast(std.mem.page_size, font.memory)[0 .. font.size]);
+	std.os.munmap(@alignCast(std.mem.page_size, font.mem));
     }
 }
 
@@ -373,9 +368,9 @@ fn grow_lines(outline: *Outline) c_int {
     return 0;
 }
 
-fn is_safe_offset(font: *Font, offset: c.uint_fast32_t, margin: u32) bool {
-    if (offset > font.size) return false;
-    if (font.size - offset < margin) return false;
+fn is_safe_offset(font: *Font, offset: usize, margin: u32) bool {
+    if (offset > font.mem.len) return false;
+    if (font.mem.len - offset < margin) return false;
     return true;
 }
 
@@ -448,24 +443,20 @@ fn cmpu32(a: [*]const u8, b: [*]const u8) i2 {
     return memcmp(a, b, 4);
 }
 
-fn getu8(font: *Font, offset: usize) u8 {
-    std.debug.assert(offset + 1 <= font.size);
-    return font.memory[offset];
-}
 fn geti8(font: *Font, offset: usize) i8 {
-    return @bitCast(i8, getu8(font, offset));
+    return @bitCast(i8, font.mem[offset]);
 }
 fn geti16(font: *Font, offset: usize) i16 {
-    std.debug.assert(offset + 2 <= font.size);
-    return std.mem.readIntBig(i16, @ptrCast(*const [2]u8, font.memory + offset));
+    std.debug.assert(offset + 2 <= font.mem.len);
+    return std.mem.readIntBig(i16, @ptrCast(*const [2]u8, font.mem.ptr + offset));
 }
 fn getu16(font: *Font, offset: usize) u16 {
-    std.debug.assert(offset + 2 <= font.size);
-    return std.mem.readIntBig(u16, @ptrCast(*const [2]u8, font.memory + offset));
+    std.debug.assert(offset + 2 <= font.mem.len);
+    return std.mem.readIntBig(u16, @ptrCast(*const [2]u8, font.mem.ptr + offset));
 }
 fn getu32(font: *Font, offset: usize) u32 {
-    std.debug.assert(offset + 4 <= font.size);
-    return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.memory + offset));
+    std.debug.assert(offset + 4 <= font.mem.len);
+    return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.mem.ptr + offset));
 }
 
 fn gettable(font: *Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
@@ -473,8 +464,8 @@ fn gettable(font: *Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
     const numTables = getu16(font, 4);
     if (!is_safe_offset(font, 12, numTables * 16))
 	return -1;
-    const match = bsearch(tag, font.memory + 12, numTables, 16, cmpu32) orelse return -1;
-    offset.* = getu32(font, @intCast(c.uint_fast32_t, @ptrToInt(match) - @ptrToInt(font.memory) + 8));
+    const match = bsearch(tag, font.mem.ptr + 12, numTables, 16, cmpu32) orelse return -1;
+    offset.* = getu32(font, @intCast(c.uint_fast32_t, @ptrToInt(match) - @ptrToInt(font.mem.ptr) + 8));
     return 0;
 }
 
@@ -501,8 +492,8 @@ fn cmap_fmt4(font: *Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !c.SFT_
     // Find the segment that contains shortCode by binary searching over
     // the highest codes in the segments.
     const key = [2]u8{ @intCast(u8, charCode >> 8), @intCast(u8, charCode & 0xff) };
-    const segAddr = @ptrToInt(csearch(&key, font.memory + endCodes, segCountX2 / 2, 2, cmpu16));
-    const segIdxX2 = @intCast(c.uint_fast32_t, (segAddr - (@ptrToInt(font.memory) + endCodes)));
+    const segAddr = @ptrToInt(csearch(&key, font.mem.ptr + endCodes, segCountX2 / 2, 2, cmpu16));
+    const segIdxX2 = @intCast(c.uint_fast32_t, (segAddr - (@ptrToInt(font.mem.ptr) + endCodes)));
     // Look up segment info from the arrays & short circuit if the spec requires.
     const startCode = getu16(font, startCodes + segIdxX2);
     if (startCode > shortCode)
@@ -713,12 +704,12 @@ fn simple_flags(font: *Font, offset: c.uint_fast32_t, numPts: c.uint_fast16_t, f
 	} else {
 	    if (!is_safe_offset(font, off, 1))
 		return error.InvalidTtfBadOutline;
-	    value = getu8(font, off);
+	    value = font.mem[off];
             off += 1;
 	    if ((value & ttf.repeat_flag) != 0) {
 		if (!is_safe_offset(font, off, 1))
 		    return error.InvalidTtfBadOutline;
-		repeat = getu8(font, off);
+		repeat = font.mem[off];
                 off += 1;
 	    }
 	}
@@ -753,7 +744,7 @@ fn simple_points(
 	    if ((flags[i] & ttf.x_change_is_small) != 0) {
 	        if (!is_safe_offset(font, off, 1))
 		    return error.InvalidTtfBadOutline;
-	        const value = getu8(font, off);
+	        const value = font.mem[off];
                 off += 1;
 	        const is_pos = (flags[i] & ttf.x_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
@@ -774,7 +765,7 @@ fn simple_points(
 	    if ((flags[i] & ttf.y_change_is_small) != 0) {
 	        if (!is_safe_offset(font, off, 1))
 		    return error.InvalidTtfBadOutline;
-	        const value = getu8(font, off);
+	        const value = font.mem[off];
                 off += 1;
 	        const is_pos = (flags[i] & ttf.y_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
