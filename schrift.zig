@@ -145,10 +145,7 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
     init_outline(&outl) catch return -1;
 
     decode_outline(sft.font, outline, 0, &outl) catch return -1;
-
-    if (c.render_outline(&outl, &transform, image) < 0)
-        return -1;
-
+    render_outline(&outl, &transform, image) catch return -1;
     return 0;
 }
 
@@ -255,32 +252,27 @@ export fn midpoint(a: c.Point, b: c.Point) c.Point {
 }
 
 // Applies an affine linear transformation matrix to a set of points.
-export fn transform_points(numPts: c_uint, points: [*]c.Point, trf: *const [6]f64) void {
-    var i: c_uint = 0;
-    while (i < numPts) : (i += 1) {
-	const pt = points[i];
-	points[i] = .{
+fn transform_points(points: []c.Point, trf: *const [6]f64) void {
+    for (points) |*pt_ref| {
+        const pt = pt_ref.*;
+        pt_ref.* = .{
 	    .x = pt.x * trf[0] + pt.y * trf[2] + trf[4],
 	    .y = pt.x * trf[1] + pt.y * trf[3] + trf[5],
 	};
     }
 }
 
-export fn clip_points(numPts: c_uint, points: [*]c.Point, width: f64, height: f64) void {
-    var i: c_uint = 0;
-    while (i < numPts) : (i += 1) {
-	const pt = points[i];
+fn clip_points(points: []c.Point, width: f64, height: f64) void {
+    for (points) |*pt| {
 	if (pt.x < 0.0) {
-	    points[i].x = 0.0;
-	}
-	if (pt.x >= width) {
-	    points[i].x = c.nextafter(width, 0.0);
+            pt.x = 0.0;
+	} else if (pt.x >= width) {
+            pt.x = c.nextafter(width, 0.0);
 	}
 	if (pt.y < 0.0) {
-	    points[i].y = 0.0;
-	}
-	if (pt.y >= height) {
-	    points[i].y = c.nextafter(height, 0.0);
+            pt.y = 0.0;
+	} else if (pt.y >= height) {
+	    pt.y = c.nextafter(height, 0.0);
 	}
     }
 }
@@ -850,11 +842,17 @@ fn simple_outline(
 	    return error.InvalidTtfBadOutline;
     }
 
-    var endPtsStackBuf = stackBuf(c.uint_fast16_t, 16);
+    // TODO: the following commented line should work but the zig compiler
+    //       isn't optimizing it correctly which causes *extreme* slowdown
+    //var endPtsStackBuf = stackBuf(c.uint_fast16_t, 16);
+    var endPtsStackBuf: StackBuf(c.uint_fast16_t, 16) = undefined;
     const endPts = try endPtsStackBuf.alloc(numContours);
     defer endPtsStackBuf.free(endPts);
 
-    var flagsStackBuf = stackBuf(u8, 128);
+    // TODO: the following commented line should work but the zig compiler
+    //       isn't optimizing it correctly which causes *extreme* slowdown
+    //var flagsStackBuf = stackBuf(u8, 128);
+    var flagsStackBuf: StackBuf(u8, 128) = undefined;
     const flags = try flagsStackBuf.alloc(numPts);
     defer flagsStackBuf.free(flags);
 
@@ -960,7 +958,7 @@ fn compound_outline(
 	if (outline != 0) {
 	    const basePoint = outl.numPoints;
 	    try decode_outline(font, outline, recDepth + 1, outl);
-	    transform_points(outl.numPoints - basePoint, outl.points + basePoint, &local);
+	    transform_points(outl.points[basePoint .. outl.numPoints], &local);
 	}
 
         if (0 == (flags & ttf.there_are_more_components)) break;
@@ -1040,7 +1038,7 @@ fn tesselate_curve(curve_in: c.Curve, outline: *c.Outline) c_int {
     return 0;
 }
 
-export fn tesselate_curves(outline: *c.Outline) c_int {
+fn tesselate_curves(outline: *c.Outline) c_int {
     var i: usize = 0;
     while (i < outline.numCurves) : (i += 1) {
         if (tesselate_curve(outline.curves[i], outline) < 0)
@@ -1154,7 +1152,7 @@ export fn draw_lines(outline: *c.Outline, buf: c.Raster) void {
 }
 
 // Integrate the values in the buffer to arrive at the final grayscale image.
-export fn post_process(buf: c.Raster, image: [*]u8) void {
+fn post_process(buf: c.Raster, image: [*]u8) void {
     var accum: f64 = 0;
     const num = @intCast(usize, buf.width) * @intCast(usize, buf.height);
     var i: usize = 0;
@@ -1166,4 +1164,32 @@ export fn post_process(buf: c.Raster, image: [*]u8) void {
         image[i] = @floatToInt(u8, value);
         accum += cell.cover;
     }
+}
+
+fn render_outline(outl: *c.Outline, transform: *const [6]f64, image: c.SFT_Image) !void {
+    transform_points(outl.points[0 .. outl.numPoints], transform);
+    clip_points(outl.points[0 .. outl.numPoints], @intToFloat(f64, image.width), @intToFloat(f64, image.height));
+
+    if (tesselate_curves(outl) < 0)
+	return error.SomethingFailed; // TODO: propagate correct error
+
+    const numPixels = @intCast(usize, image.width) * @intCast(usize, image.height);
+    // TODO: the following commented line should work but the zig compiler
+    //       isn't optimizing it correctly which causes *extreme* slowdown
+    // Zig's 'undefined' debug checks make this ungodly slow
+    const stack_len = if (builtin.mode == .Debug) 0 else 128 * 128;
+    //var cellStackBuf = stackBuf(c.Cell, stack_len);
+    var cellStackBuf: StackBuf(c.Cell, stack_len) = undefined;
+    const cells = try cellStackBuf.alloc(numPixels);
+    defer cellStackBuf.free(cells);
+
+    // TODO: I wonder if this could be removed?
+    @memset(@ptrCast([*]u8, cells), 0, numPixels * @sizeOf(@TypeOf(cells[0])));
+    const buf = c.Raster {
+        .cells = cells,
+        .width = image.width,
+        .height = image.height,
+    };
+    draw_lines(outl, buf);
+    post_process(buf, @ptrCast([*]u8, image.pixels));
 }

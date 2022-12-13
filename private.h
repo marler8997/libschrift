@@ -64,11 +64,6 @@ struct Raster
 /* TTF parsing utilities */
 /*static*/ inline int is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin);
 /*static*/ int gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset);
-/* tesselation */
-//static int  is_flat(Outline *outl, Curve curve);
-//static int  tesselate_curve(Curve curve, Outline *outl);
-/*static*/ int  tesselate_curves(Outline *outl);
 /* silhouette rasterization */
 /*static*/ void draw_lines(Outline *outl, Raster buf);
-/* glyph rendering */
 /*static*/ int  render_outline(Outline *outl, double transform[6], SFT_Image image);

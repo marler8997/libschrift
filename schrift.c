@@ -67,11 +67,7 @@
 #define STACK_FREE(var) \
 	if (var != var##_stack_) free(var);
 
-/* structs */
 /* function declarations */
-/* simple mathematical operations */
-static void transform_points(unsigned int numPts, Point *points, double trf[6]);
-static void clip_points(unsigned int numPts, Point *points, double width, double height);
 /* 'outline' data structure management */
 /*static*/ int  grow_curves (Outline *outl);
 /* TTF parsing utilities */
@@ -84,8 +80,6 @@ static inline int_least8_t   geti8 (SFT_Font *font, uint_fast32_t offset);
 static inline uint_least16_t getu16(SFT_Font *font, uint_fast32_t offset);
 static inline int_least16_t  geti16(SFT_Font *font, uint_fast32_t offset);
 static inline uint_least32_t getu32(SFT_Font *font, uint_fast32_t offset);
-/* post-processing */
-/*static*/ void post_process(Raster buf, uint8_t *image);
 
 /* function implementations */
 
@@ -215,39 +209,3 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 	*glyph = getu16(font, table + 4 + 2 * charCode);
 	return 0;
 }
-
-/*static*/ int
-render_outline(Outline *outl, double transform[6], SFT_Image image)
-{
-	Cell *cells = NULL;
-	Raster buf;
-	unsigned int numPixels;
-	
-	numPixels = (unsigned int) image.width * (unsigned int) image.height;
-
-	STACK_ALLOC(cells, Cell, 128 * 128, numPixels);
-	if (!cells) {
-		return -1;
-	}
-	memset(cells, 0, numPixels * sizeof *cells);
-	buf.cells  = cells;
-	buf.width  = image.width;
-	buf.height = image.height;
-
-	transform_points(outl->numPoints, outl->points, transform);
-
-	clip_points(outl->numPoints, outl->points, image.width, image.height);
-
-	if (tesselate_curves(outl) < 0) {
-		STACK_FREE(cells);
-		return -1;
-	}
-
-	draw_lines(outl, buf);
-
-	post_process(buf, image.pixels);
-
-	STACK_FREE(cells);
-	return 0;
-}
-

@@ -11,10 +11,10 @@ VERSION=0.10.2
 all: libschrift.a demo stress
 
 libschrift.a: schrift.c schrift.h private.h schrift.zig
-	zig build-lib -static -I. schrift.zig -lc -cflags $(CFLAGS) -- schrift.c
+	zig build-lib -OReleaseFast -static -I. schrift.zig -lc -cflags $(CFLAGS) -- schrift.c
 
 demo: libschrift.a
-	zig build-exe $(EXTRA_CFLAGS) demo.c $(EXTRAS_CPPFLAGS) -I$(X11INC) -L$(X11LIB) -lX11 -lXrender -L. -lschrift -lm
+	zig build-exe -OReleaseFast $(EXTRA_CFLAGS) demo.c $(EXTRAS_CPPFLAGS) -I$(X11INC) -L$(X11LIB) -lX11 -lXrender -L. -lschrift -lm
 
 stress: stress.o libschrift.a
 	$(LD) $(EXTRAS_LDFLAGS) $@.o -o $@ -L. -lschrift -lm
