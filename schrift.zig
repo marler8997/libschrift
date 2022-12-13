@@ -38,19 +38,10 @@ const Curve = struct {
     ctrl: c.uint_least16_t,
 };
 
-fn Al(comptime T: type) type {
-    return struct {
-        items: struct {
-            ptr: [*]T = &[_]T{ },
-            len: c.uint_least16_t = 0,
-        } = .{},
-        capacity: c.uint_least16_t = 0,
-    };
-}
 const Outline = struct {
-    points: Al(Point) = .{},
-    curves: Al(Curve) = .{},
-    lines: Al(Line) = .{},
+    points: std.ArrayListUnmanaged(Point) = .{},
+    curves: std.ArrayListUnmanaged(Curve) = .{},
+    lines: std.ArrayListUnmanaged(Line) = .{},
 };
 
 const Cell = struct {
@@ -359,11 +350,10 @@ fn free_outline(outl: *Outline) void {
     if (outl.lines.capacity != 0) c.free(outl.lines.items.ptr);
 }
 
-fn grow(comptime T: type, cap_ref: *c.uint_least16_t, ptr_ref: *[*]T) error{OutOfMemory,TooManyPrimitives}!void {
+fn grow(comptime T: type, cap_ref: *usize, ptr_ref: *[*]T) error{OutOfMemory,TooManyPrimitives}!void {
     std.debug.assert(cap_ref.* > 0);
-    if (cap_ref.* > std.math.maxInt(u16) / 2)
-	return error.TooManyPrimitives;
     const next_cap = cap_ref.* * 2;
+    std.debug.assert(next_cap > cap_ref.*);
     const ptr = c.realloc(ptr_ref.*, next_cap * @sizeOf(T)) orelse return error.OutOfMemory;
     cap_ref.* = next_cap;
     ptr_ref.* = @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
@@ -783,11 +773,10 @@ fn decode_contour(
     var count = count_start;
     const looseEnd: c.uint_least16_t = blk: {
         if (0 != (flags[0] & ttf.point_is_on_curve)) {
-            const looseEnd = @intCast(c.uint_least16_t, basePoint);
             basePoint += 1;
             flags += 1;
             count -= 1;
-            break :blk looseEnd;
+            break :blk @intCast(c.uint_least16_t, basePoint - 1);
         }
         if (0 != (flags[count - 1] & ttf.point_is_on_curve)) {
             count -= 1;
@@ -800,7 +789,7 @@ fn decode_contour(
 	outl.points.items.ptr[outl.points.items.len] = midpoint(
 	    outl.points.items.ptr[basePoint],
 	    outl.points.items.ptr[basePoint + count - 1]);
-        const looseEnd = outl.points.items.len;
+        const looseEnd = @intCast(c.uint_least16_t, outl.points.items.len);
         outl.points.items.len += 1;
         break :blk looseEnd;
     };
@@ -826,7 +815,7 @@ fn decode_contour(
             opt_ctrl = null;
 	} else {
 	    if (opt_ctrl) |ctrl| {
-		const center: c.uint_least16_t = outl.points.items.len;
+		const center: c.uint_least16_t = @intCast(c.uint_least16_t, outl.points.items.len);
 		if (outl.points.items.len >= outl.points.capacity and grow_points(outl) < 0)
 	            return error.InvalidTtfBadOutline;
 		outl.points.items.ptr[center] = midpoint(outl.points.items.ptr[ctrl], outl.points.items.ptr[cur]);
@@ -880,7 +869,7 @@ fn simple_outline(
     outl: *Outline,
 ) !void {
     std.debug.assert(numContours > 0);
-    const basePoint: c.uint_fast16_t = outl.points.items.len;
+    const basePoint: c.uint_fast16_t = @intCast(c.uint_fast16_t, outl.points.items.len);
 
     if (!is_safe_offset(font, offset_start, numContours * 2 + 2))
 	return error.InvalidTtfBadOutline;
@@ -1067,19 +1056,19 @@ fn tesselate_curve(curve_in: Curve, outline: *Outline) c_int {
             top -= 1;
 	    curve = stack[top];
 	} else {
-	    const ctrl0 = outline.points.items.len;
+	    const ctrl0 = @intCast(c.uint_least16_t, outline.points.items.len);
 	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
 		return -1;
 	    outline.points.items.ptr[ctrl0] = midpoint(outline.points.items.ptr[curve.beg], outline.points.items.ptr[curve.ctrl]);
             outline.points.items.len += 1;
 
-	    const ctrl1 = outline.points.items.len;
+	    const ctrl1 = @intCast(c.uint_least16_t, outline.points.items.len);
 	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
 		return -1;
 	    outline.points.items.ptr[ctrl1] = midpoint(outline.points.items.ptr[curve.ctrl], outline.points.items.ptr[curve.end]);
             outline.points.items.len += 1;
 
-	    const pivot = outline.points.items.len;
+	    const pivot = @intCast(c.uint_least16_t, outline.points.items.len);
 	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
 		return -1;
 	    outline.points.items.ptr[pivot] = midpoint(outline.points.items.ptr[ctrl0], outline.points.items.ptr[ctrl1]);
