@@ -243,32 +243,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 	return 0;
 }
 
-/* For a 'simple' outline, determines each point of the outline with a set of flags. */
-static int
-simple_flags(SFT_Font *font, uint_fast32_t *offset, uint_fast16_t numPts, uint8_t *flags)
-{
-	uint_fast32_t off = *offset;
-	uint_fast16_t i;
-	uint8_t value = 0, repeat = 0;
-	for (i = 0; i < numPts; ++i) {
-		if (repeat) {
-			--repeat;
-		} else {
-			if (!is_safe_offset(font, off, 1))
-				return -1;
-			value = getu8(font, off++);
-			if (value & REPEAT_FLAG) {
-				if (!is_safe_offset(font, off, 1))
-					return -1;
-				repeat = getu8(font, off++);
-			}
-		}
-		flags[i] = value;
-	}
-	*offset = off;
-	return 0;
-}
-
 /* For a 'simple' outline, decodes both X and Y coordinates for each point of the outline. */
 static int
 simple_points(SFT_Font *font, uint_fast32_t offset, uint_fast16_t numPts, uint8_t *flags, Point *points)

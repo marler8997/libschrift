@@ -8,8 +8,11 @@ const c = @cImport({
     @cInclude("private.h");
 });
 
-const file_magic_one = 0x00010000;
-const file_magic_two = 0x74727565;
+const ttf = struct {
+    pub const file_magic_one = 0x00010000;
+    pub const file_magic_two = 0x74727565;
+    pub const repeat_flag = 0x08;
+};
 
 export fn sft_version() [*:0]const u8 {
     return "0.10.2";
@@ -212,7 +215,7 @@ fn init_font(font: *c.SFT_Font) !void {
 
     // Check for a compatible scalerType (magic number).
     const scalerType = getu32(font, 0);
-    if (scalerType != file_magic_one and scalerType != file_magic_two)
+    if (scalerType != ttf.file_magic_one and scalerType != ttf.file_magic_two)
 	return error.InvalidTtfBadMagic;
 
     var head: c.uint_fast32_t = undefined;
@@ -363,10 +366,10 @@ export fn cmpu32(a: ?*const anyopaque, b: ?*const anyopaque) c_int {
     return c.memcmp(a, b, 4);
 }
 
-//export fn getu8(font: *c.SFT_Font, offset: u32) c.uint_least8 {
-//    std.debug.assert(offset + 1 <= font.size);
-//    return @intCast(c.uint_least8, font.memory[offset]);
-//}
+fn getu8(font: *c.SFT_Font, offset: usize) u8 {
+    std.debug.assert(offset + 1 <= font.size);
+    return font.memory[offset];
+}
 //export fn geti8(font: *c.SFT_Font, offset: u32) c.int_least8 {
 //    return @bitCast(c.int_least8, getU8(font, offset));
 //}
@@ -621,6 +624,33 @@ fn outline_offset_zig(font: *c.SFT_Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
         };
     };
     return if (entry.this == entry.next) 0 else glyf + entry.this;
+}
+
+// For a 'simple' outline, determines each point of the outline with a set of flags.
+export fn simple_flags(font: *c.SFT_Font, offset_ref: *c.uint_fast32_t, numPts: c.uint_fast16_t, flags: [*]u8) c_int {
+    var off = offset_ref.*;
+    var repeat: u8 = 0;
+    var value: u8 = 0;
+    var point_index: c.uint_fast16_t = 0;
+    while (point_index < numPts) : (point_index += 1) {
+	if (repeat != 0) {
+            repeat -= 1;
+	} else {
+	    if (!is_safe_offset_zig(font, off, 1))
+		return -1;
+	    value = getu8(font, off);
+            off += 1;
+	    if ((value & ttf.repeat_flag) != 0) {
+		if (!is_safe_offset_zig(font, off, 1))
+		    return -1;
+		repeat = getu8(font, off);
+                off += 1;
+	    }
+	}
+	flags[point_index] = value;
+    }
+    offset_ref.* = off;
+    return 0;
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
