@@ -28,8 +28,12 @@ const Font = struct {
     }
 };
 
+const Cell = struct {
+    area: f64,
+    cover: f64,
+};
 const Raster = struct {
-    cells: [*]c.Cell,
+    cells: [*]Cell,
     width: c_int,
     height: c_int,
 };
@@ -1204,8 +1208,8 @@ fn render_outline(outl: *c.Outline, transform: *const [6]f64, image: c.SFT_Image
     //       isn't optimizing it correctly which causes *extreme* slowdown
     // Zig's 'undefined' debug checks make this ungodly slow
     const stack_len = if (builtin.mode == .Debug) 0 else 128 * 128;
-    //var cellStackBuf = stackBuf(c.Cell, stack_len);
-    var cellStackBuf: StackBuf(c.Cell, stack_len) = undefined;
+    //var cellStackBuf = stackBuf(Cell, stack_len);
+    var cellStackBuf: StackBuf(Cell, stack_len) = undefined;
     const cells = try cellStackBuf.alloc(numPixels);
     defer cellStackBuf.free(cells);
 
