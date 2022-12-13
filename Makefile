@@ -10,8 +10,8 @@ VERSION=0.10.2
 
 all: libschrift.a demo stress
 
-libschrift.a: schrift.c schrift.h private.h schrift.zig
-	zig build-lib -OReleaseFast -static -I. schrift.zig -lc -cflags $(CFLAGS) -- schrift.c
+libschrift.a: schrift.h private.h schrift.zig
+	zig build-lib -OReleaseFast -static -I. schrift.zig -lc
 
 demo: libschrift.a
 	zig build-exe -OReleaseFast $(EXTRA_CFLAGS) demo.c $(EXTRAS_CPPFLAGS) -I$(X11INC) -L$(X11LIB) -lX11 -lXrender -L. -lschrift -lm
@@ -52,7 +52,7 @@ dist:
 	mkdir -p "schrift-$(VERSION)"
 	cp -R README.md LICENSE CHANGELOG.md TODO.md schrift.3 \
 		Makefile config.mk \
-		schrift.c schrift.h demo.c stress.c \
+		schrift.h demo.c stress.c \
 		resources/ util/ \
 		"schrift-$(VERSION)"
 	tar -cf - "schrift-$(VERSION)" | gzip -c > "schrift-$(VERSION).tar.gz"
