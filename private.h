@@ -62,7 +62,6 @@ struct Raster
 /*static*/ int gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset);
 /* glyph metrics lookup */
 /*static*/ int  glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4]);
-/*static*/ int  hor_metrics(SFT_Font *font, uint_fast32_t glyph, int *advanceWidth, int *leftSideBearing);
 /* decoding outlines */
 /*static*/ int  outline_offset(SFT_Font *font, uint_fast32_t glyph, uint_fast32_t *offset);
 /*static*/ int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);

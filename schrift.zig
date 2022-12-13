@@ -86,13 +86,10 @@ export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: *c.SFT_Gl
 export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics) c_int {
     @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
 
-    var adv: c_int = undefined;
-    var lsb: c_int = undefined;
-    if (c.hor_metrics(sft.font, glyph, &adv, &lsb) < 0)
-	return -1;
+    const hor = hor_metrics(sft.font, glyph) catch return -1;
     const xScale = sft.xScale / @intToFloat(f64, sft.font.*.unitsPerEm);
-    metrics.advanceWidth    = @intToFloat(f64, adv) * xScale;
-    metrics.leftSideBearing = @intToFloat(f64, lsb) * xScale + sft.xOffset;
+    metrics.advanceWidth    = @intToFloat(f64, hor.advance_width) * xScale;
+    metrics.leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScale + sft.xOffset;
 
     var outline: c.uint_fast32_t = undefined;
     if (c.outline_offset(sft.font, glyph, &outline) < 0)
@@ -529,6 +526,45 @@ fn glyph_id(font: *c.SFT_Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
     }
 
     return error.UnsupportedCharCode; // I guess?
+}
+
+
+const HorMetrics = struct {
+    advance_width: u16,
+    left_side_bearing: i16,
+};
+fn hor_metrics(font: *c.SFT_Font, glyph: c.SFT_Glyph) !HorMetrics {
+    var hmtx: c.uint_fast32_t = undefined;
+    if (gettable(font, "hmtx", &hmtx) < 0)
+        return error.InvalidTtfNoHmtxTable;
+
+    if (glyph < font.numLongHmtx) {
+	// glyph is inside long metrics segment.
+	const offset = hmtx + 4 * glyph;
+	if (!is_safe_offset_zig(font, offset, 4))
+            return error.InvalidTtfBadHmtxTable;
+        return .{
+            .advance_width = getu16(font, offset),
+            .left_side_bearing = geti16(font, offset + 2),
+        };
+    }
+
+    // glyph is inside short metrics segment.
+    const boundary = hmtx + 4 * @intCast(c.uint_fast32_t, font.numLongHmtx);
+    if (boundary < 4)
+        return error.InvalidTtfBadHmtxTable;
+
+    const width_offset = boundary - 4;
+    if (!is_safe_offset_zig(font, width_offset, 4))
+        return error.InvalidTtfBadHmtxTable;
+    const bearing_offset = boundary + 2 * (glyph - font.numLongHmtx);
+    if (!is_safe_offset_zig(font, bearing_offset, 2))
+        return error.InvalidTtfBadHmtxTable;
+
+    return .{
+        .advance_width = getu16(font, width_offset),
+	.left_side_bearing = geti16(font, bearing_offset),
+    };
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.

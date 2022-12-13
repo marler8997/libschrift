@@ -244,39 +244,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 }
 
 /*static*/ int
-hor_metrics(SFT_Font *font, SFT_Glyph glyph, int *advanceWidth, int *leftSideBearing)
-{
-	uint_fast32_t hmtx, offset, boundary;
-	if (gettable(font, "hmtx", &hmtx) < 0)
-		return -1;
-	if (glyph < font->numLongHmtx) {
-		/* glyph is inside long metrics segment. */
-		offset = hmtx + 4 * glyph;
-		if (!is_safe_offset(font, offset, 4))
-			return -1;
-		*advanceWidth = getu16(font, offset);
-		*leftSideBearing = geti16(font, offset + 2);
-		return 0;
-	} else {
-		/* glyph is inside short metrics segment. */
-		boundary = hmtx + 4U * (uint_fast32_t) font->numLongHmtx;
-		if (boundary < 4)
-			return -1;
-		
-		offset = boundary - 4;
-		if (!is_safe_offset(font, offset, 4))
-			return -1;
-		*advanceWidth = getu16(font, offset);
-		
-		offset = boundary + 2 * (glyph - font->numLongHmtx);
-		if (!is_safe_offset(font, offset, 2))
-			return -1;
-		*leftSideBearing = geti16(font, offset);
-		return 0;
-	}
-}
-
-/*static*/ int
 glyph_bbox(const SFT *sft, uint_fast32_t outline, int box[4])
 {
 	double xScale, yScale;
