@@ -44,26 +44,3 @@ struct SFT_Font
 	int_least16_t  locaFormat;
 	uint_least16_t numLongHmtx;
 };
-
-struct Raster
-{
-	Cell *cells;
-	int   width;
-	int   height;
-};
-
-/* generic utility functions */
-/*static*/ void *reallocarray(void *optr, size_t nmemb, size_t size);
-/* file loading */
-/*static*/ int  init_font (SFT_Font *font);
-/* simple mathematical operations */
-/*static*/ Point midpoint(Point a, Point b);
-/* 'outline' data structure management */
-/*static*/ int  grow_points (Outline *outl);
-/*static*/ int  grow_lines  (Outline *outl);
-/* TTF parsing utilities */
-/*static*/ inline int is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin);
-/*static*/ int gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset);
-/* silhouette rasterization */
-/*static*/ void draw_lines(Outline *outl, Raster buf);
-/*static*/ int  render_outline(Outline *outl, double transform[6], SFT_Image image);

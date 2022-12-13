@@ -8,6 +8,12 @@ const c = @cImport({
     @cInclude("private.h");
 });
 
+const Raster = struct {
+    cells: [*]c.Cell,
+    width: c_int,
+    height: c_int,
+};
+
 const ttf = struct {
     pub const file_magic_one = 0x00010000;
     pub const file_magic_two = 0x74727565;
@@ -80,7 +86,7 @@ export fn sft_freefont(font: ?*c.SFT_Font) void {
 export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
     @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
     var hhea: c.uint_fast32_t = undefined;
-    if (c.gettable(sft.font, @ptrCast([*c]const u8, "hhea"), &hhea) < 0)
+    if (gettable(sft.font, "hhea", &hhea) < 0)
 	return -1;
     if (!is_safe_offset(sft.font, hhea, 36))
 	return -1;
@@ -230,21 +236,21 @@ fn init_font(font: *c.SFT_Font) !void {
 	return error.InvalidTtfBadMagic;
 
     var head: c.uint_fast32_t = undefined;
-    if (c.gettable(font, "head", &head) < 0)
+    if (gettable(font, "head", &head) < 0)
 	return error.InvalidTtfNoHeadTable;
     if (!is_safe_offset(font, head, 54))
         return error.InvalidTtfBadHeadTable;
     font.unitsPerEm = getu16(font, head + 18);
     font.locaFormat = geti16(font, head + 50);
     var hhea: c.uint_fast32_t = undefined;
-    if (c.gettable(font, "hhea", &hhea) < 0)
+    if (gettable(font, "hhea", &hhea) < 0)
         return error.InvalidTtfNoHheaTable;
     if (!is_safe_offset(font, hhea, 36))
         return error.InvalidTtfBadHheaTable;
     font.numLongHmtx = getu16(font, hhea + 34);
 }
 
-export fn midpoint(a: c.Point, b: c.Point) c.Point {
+fn midpoint(a: c.Point, b: c.Point) c.Point {
     return .{
 	.x = 0.5 * (a.x + b.x),
 	.y = 0.5 * (a.y + b.y),
@@ -311,17 +317,17 @@ fn grow(comptime T: type, cap_ref: *c.uint_least16_t, ptr_ref: *[*c]T) error{Out
     ptr_ref.* = @ptrCast([*c]T, @alignCast(@alignOf(T), ptr));
 }
 
-export fn grow_points(outline: *c.Outline) c_int {
+fn grow_points(outline: *c.Outline) c_int {
     grow(c.Point, &outline.capPoints, &outline.points) catch return -1;
     return 0;
 }
 
-export fn grow_curves(outline: *c.Outline) c_int {
+fn grow_curves(outline: *c.Outline) c_int {
     grow(c.Curve, &outline.capCurves, &outline.curves) catch return -1;
     return 0;
 }
 
-export fn grow_lines(outline: *c.Outline) c_int {
+fn grow_lines(outline: *c.Outline) c_int {
     grow(c.Line, &outline.capLines, &outline.lines) catch return -1;
     return 0;
 }
@@ -333,7 +339,7 @@ fn is_safe_offset(font: *c.SFT_Font, offset: c.uint_fast32_t, margin: u32) bool 
 }
 
 // Like bsearch(), but returns the next highest element if key could not be found.
-export fn csearch(
+fn csearch(
     key: *const anyopaque,
     base: *const anyopaque,
     nmemb: usize,
@@ -388,7 +394,7 @@ fn getu32(font: *c.SFT_Font, offset: usize) u32 {
     return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.memory + offset));
 }
 
-export fn gettable(font: *c.SFT_Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
+fn gettable(font: *c.SFT_Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
     const numTables = getu16(font, 4);
     if (!is_safe_offset(font, 12, numTables * 16))
@@ -1009,21 +1015,21 @@ fn tesselate_curve(curve_in: c.Curve, outline: *c.Outline) c_int {
 	    curve = stack[top];
 	} else {
 	    const ctrl0 = outline.numPoints;
-	    if (outline.numPoints >= outline.capPoints and c.grow_points(outline) < 0)
+	    if (outline.numPoints >= outline.capPoints and grow_points(outline) < 0)
 		return -1;
-	    outline.points[ctrl0] = c.midpoint(outline.points[curve.beg], outline.points[curve.ctrl]);
+	    outline.points[ctrl0] = midpoint(outline.points[curve.beg], outline.points[curve.ctrl]);
             outline.numPoints += 1;
 
 	    const ctrl1 = outline.numPoints;
-	    if (outline.numPoints >= outline.capPoints and c.grow_points(outline) < 0)
+	    if (outline.numPoints >= outline.capPoints and grow_points(outline) < 0)
 		return -1;
-	    outline.points[ctrl1] = c.midpoint(outline.points[curve.ctrl], outline.points[curve.end]);
+	    outline.points[ctrl1] = midpoint(outline.points[curve.ctrl], outline.points[curve.end]);
             outline.numPoints += 1;
 
 	    const pivot = outline.numPoints;
-	    if (outline.numPoints >= outline.capPoints and c.grow_points(outline) < 0)
+	    if (outline.numPoints >= outline.capPoints and grow_points(outline) < 0)
 		return -1;
-	    outline.points[pivot] = c.midpoint(outline.points[ctrl0], outline.points[ctrl1]);
+	    outline.points[pivot] = midpoint(outline.points[ctrl0], outline.points[ctrl1]);
             outline.numPoints += 1;
 
 	    stack[top] = .{ .beg = curve.beg, .end = pivot, .ctrl = ctrl0 };
@@ -1056,7 +1062,7 @@ fn fast_ceil(x: f64) c_int {
 }
 
 // Draws a line into the buffer. Uses a custom 2D raycasting algorithm to do so.
-fn draw_line(buf: c.Raster, origin: c.Point, goal: c.Point) void {
+fn draw_line(buf: Raster, origin: c.Point, goal: c.Point) void {
     const delta = c.Point{
         .x = goal.x - origin.x,
         .y = goal.y - origin.y,
@@ -1137,7 +1143,7 @@ fn draw_line(buf: c.Raster, origin: c.Point, goal: c.Point) void {
     cptr.* = cell;
 }
 
-export fn draw_lines(outline: *c.Outline, buf: c.Raster) void {
+fn draw_lines(outline: *c.Outline, buf: Raster) void {
     var i: usize = 0;
     while (i < outline.numLines) : (i += 1) {
         const line = outline.lines[i];
@@ -1148,7 +1154,7 @@ export fn draw_lines(outline: *c.Outline, buf: c.Raster) void {
 }
 
 // Integrate the values in the buffer to arrive at the final grayscale image.
-fn post_process(buf: c.Raster, image: [*]u8) void {
+fn post_process(buf: Raster, image: [*]u8) void {
     var accum: f64 = 0;
     const num = @intCast(usize, buf.width) * @intCast(usize, buf.height);
     var i: usize = 0;
@@ -1181,7 +1187,7 @@ fn render_outline(outl: *c.Outline, transform: *const [6]f64, image: c.SFT_Image
 
     // TODO: I wonder if this could be removed?
     @memset(@ptrCast([*]u8, cells), 0, numPixels * @sizeOf(@TypeOf(cells[0])));
-    const buf = c.Raster {
+    const buf = Raster {
         .cells = cells,
         .width = image.width,
         .height = image.height,
