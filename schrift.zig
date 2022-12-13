@@ -1,7 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
 const c = @cImport({
-    @cInclude("string.h");
     @cInclude("stdlib.h");
     @cInclude("math.h");
     @cInclude("schrift.h");
@@ -380,13 +379,37 @@ fn is_safe_offset(font: *Font, offset: c.uint_fast32_t, margin: u32) bool {
     return true;
 }
 
+fn bsearch(
+    key: *const anyopaque,
+    base: *const anyopaque,
+    nmemb: usize,
+    size: usize,
+    compar: *const fn([*]const u8, [*]const u8) i2,
+) ?*const anyopaque {
+    var next_base = base;
+    var nel = nmemb;
+    while (nel > 0) {
+        const t = @ptrCast([*]const u8, next_base) + size * (nel / 2);
+        const s = compar(@ptrCast([*]const u8, key), t);
+        if (s < 0) {
+            nel /= 2;
+        } else if (s > 0) {
+            next_base = t + size;
+            nel -= nel / 2 + 1;
+        } else {
+            return t;
+        }
+    }
+    return null;
+}
+
 // Like bsearch(), but returns the next highest element if key could not be found.
 fn csearch(
     key: *const anyopaque,
     base: *const anyopaque,
     nmemb: usize,
     size: usize,
-    compar: *const fn(?*const anyopaque, ?*const anyopaque) callconv(.C) c_int,
+    compar: *const fn([*]const u8, [*]const u8) i2,
 ) ?*const anyopaque {
 
     if (nmemb == 0) return null;
@@ -397,7 +420,7 @@ fn csearch(
     while (low != high) {
 	const mid = low + (high - low) / 2;
 	const sample = bytes + mid * size;
-	if (compar(key, sample) > 0) {
+	if (compar(@ptrCast([*]const u8, key), sample) > 0) {
 	    low = mid + 1;
 	} else {
 	    high = mid;
@@ -406,14 +429,23 @@ fn csearch(
     return bytes + low * size;
 }
 
-// Used as a comparison function for [bc]search().
-export fn cmpu16(a: ?*const anyopaque, b: ?*const anyopaque) c_int {
-    return c.memcmp(a, b, 2);
+fn memcmp(l: [*]const u8, r: [*]const u8, len: usize) i2 {
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        if (i == len) return 0;
+        if (l[i] > r[i]) return 1;
+        if (l[i] < r[i]) return -1;
+    }
 }
 
 // Used as a comparison function for [bc]search().
-export fn cmpu32(a: ?*const anyopaque, b: ?*const anyopaque) c_int {
-    return c.memcmp(a, b, 4);
+fn cmpu16(a: [*]const u8, b: [*]const u8) i2 {
+    return memcmp(a, b, 2);
+}
+
+// Used as a comparison function for [bc]search().
+fn cmpu32(a: [*]const u8, b: [*]const u8) i2 {
+    return memcmp(a, b, 4);
 }
 
 fn getu8(font: *Font, offset: usize) u8 {
@@ -441,7 +473,7 @@ fn gettable(font: *Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
     const numTables = getu16(font, 4);
     if (!is_safe_offset(font, 12, numTables * 16))
 	return -1;
-    const match = c.bsearch(tag, font.memory + 12, numTables, 16, cmpu32) orelse return -1;
+    const match = bsearch(tag, font.memory + 12, numTables, 16, cmpu32) orelse return -1;
     offset.* = getu32(font, @intCast(c.uint_fast32_t, @ptrToInt(match) - @ptrToInt(font.memory) + 8));
     return 0;
 }
