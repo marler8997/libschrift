@@ -368,15 +368,15 @@ export fn cmpu32(a: ?*const anyopaque, b: ?*const anyopaque) c_int {
 //    return @bitCast(c.int_least8, getU8(font, offset));
 //}
 
-fn geti16(font: *c.SFT_Font, offset: c.uint_fast32_t) i16 {
+fn geti16(font: *c.SFT_Font, offset: usize) i16 {
     std.debug.assert(offset + 2 <= font.size);
     return std.mem.readIntBig(i16, @ptrCast(*const [2]u8, font.memory + offset));
 }
-fn getu16(font: *c.SFT_Font, offset: c.uint_fast32_t) u16 {
+fn getu16(font: *c.SFT_Font, offset: usize) u16 {
     std.debug.assert(offset + 2 <= font.size);
     return std.mem.readIntBig(u16, @ptrCast(*const [2]u8, font.memory + offset));
 }
-fn getu32(font: *c.SFT_Font, offset: c.uint_fast32_t) u32 {
+fn getu32(font: *c.SFT_Font, offset: usize) u32 {
     std.debug.assert(offset + 4 <= font.size);
     return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.memory + offset));
 }
