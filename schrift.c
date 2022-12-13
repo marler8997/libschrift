@@ -243,40 +243,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 	return 0;
 }
 
-/* Returns the offset into the font that the glyph's outline is stored at. */
-/*static*/ int
-outline_offset(SFT_Font *font, SFT_Glyph glyph, uint_fast32_t *offset)
-{
-	uint_fast32_t loca, glyf;
-	uint_fast32_t base, this, next;
-
-	if (gettable(font, "loca", &loca) < 0)
-		return -1;
-	if (gettable(font, "glyf", &glyf) < 0)
-		return -1;
-
-	if (font->locaFormat == 0) {
-		base = loca + 2 * glyph;
-
-		if (!is_safe_offset(font, base, 4))
-			return -1;
-		
-		this = 2U * (uint_fast32_t) getu16(font, base);
-		next = 2U * (uint_fast32_t) getu16(font, base + 2);
-	} else {
-		base = loca + 4 * glyph;
-
-		if (!is_safe_offset(font, base, 8))
-			return -1;
-
-		this = getu32(font, base);
-		next = getu32(font, base + 4);
-	}
-
-	*offset = this == next ? 0 : glyf + this;
-	return 0;
-}
-
 /* For a 'simple' outline, determines each point of the outline with a set of flags. */
 static int
 simple_flags(SFT_Font *font, uint_fast32_t *offset, uint_fast16_t numPts, uint8_t *flags)

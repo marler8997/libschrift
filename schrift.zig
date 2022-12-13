@@ -91,9 +91,7 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
     metrics.advanceWidth    = @intToFloat(f64, hor.advance_width) * xScale;
     metrics.leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScale + sft.xOffset;
 
-    var outline: c.uint_fast32_t = undefined;
-    if (c.outline_offset(sft.font, glyph, &outline) < 0)
-	return -1;
+    const outline = outline_offset_zig(sft.font, glyph) catch return -1;
     if (outline == 0)
 	return 0;
     const bbox = glyph_bbox(sft, outline) catch return -1;
@@ -104,9 +102,7 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
 }
 
 export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
-    var outline: c.uint_fast32_t = undefined;
-    if (c.outline_offset(sft.font, glyph, &outline) < 0)
-	return -1;
+    const outline = outline_offset_zig(sft.font, glyph) catch return -1;
     if (outline == 0)
 	return 0;
     const bbox = glyph_bbox(sft, outline) catch return -1;
@@ -583,6 +579,45 @@ fn glyph_bbox(sft: *c.SFT, outline: c.uint_fast32_t) ![4]c_int {
         @floatToInt(c_int, @ceil (@intToFloat(f64, box[2]) * xScale + sft.xOffset)),
         @floatToInt(c_int, @ceil (@intToFloat(f64, box[3]) * yScale + sft.yOffset)),
     };
+}
+
+export fn outline_offset(font: *c.SFT_Font, glyph: c.SFT_Glyph, offset: *c.uint_fast32_t) c_int {
+    if (outline_offset_zig(font, glyph)) |o| {
+        offset.* = o;
+        return 0;
+    } else |_| return -1;
+}
+
+// Returns the offset into the font that the glyph's outline is stored at.
+fn outline_offset_zig(font: *c.SFT_Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
+    var loca: c.uint_fast32_t = undefined;
+    if (gettable(font, "loca", &loca) < 0)
+	return error.InvalidTtfNoLocaTable;
+
+    var glyf: c.uint_fast32_t = undefined;
+    if (gettable(font, "glyf", &glyf) < 0)
+	return error.InvalidttfNoGlyfTable;
+
+    const entry = blk: {
+        if (font.locaFormat == 0) {
+	    const base = loca + 2 * glyph;
+	    if (!is_safe_offset_zig(font, base, 4))
+	        return error.InvalidTtfBadLocaTable;
+            break :blk .{
+	        .this = 2 * @intCast(u32, getu16(font, base)),
+	        .next = 2 * @intCast(u32, getu16(font, base + 2)),
+            };
+        }
+
+	const base = loca + 4 * glyph;
+	if (!is_safe_offset_zig(font, base, 8))
+	    return error.InvalidTtfBadLocaTable;
+        break :blk .{
+	    .this = getu32(font, base),
+	    .next = getu32(font, base + 4),
+        };
+    };
+    return if (entry.this == entry.next) 0 else glyf + entry.this;
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
