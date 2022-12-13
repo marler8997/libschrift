@@ -11,7 +11,14 @@ const c = @cImport({
 const ttf = struct {
     pub const file_magic_one = 0x00010000;
     pub const file_magic_two = 0x74727565;
-    pub const repeat_flag = 0x08;
+
+    pub const x_change_is_small     = 0x02;
+    pub const y_change_is_small     = 0x04;
+    pub const repeat_flag           = 0x08;
+    pub const x_change_is_zero      = 0x10;
+    pub const x_change_is_positive  = 0x10;
+    pub const y_change_is_zero      = 0x20;
+    pub const y_change_is_positive  = 0x20;
 };
 
 export fn sft_version() [*:0]const u8 {
@@ -650,6 +657,70 @@ export fn simple_flags(font: *c.SFT_Font, offset_ref: *c.uint_fast32_t, numPts: 
 	flags[point_index] = value;
     }
     offset_ref.* = off;
+    return 0;
+}
+
+fn resolveSign(comptime T: type, is_pos: bool, value: T) T {
+    const all_ones = @bitCast(T, switch (T) {
+        i32 => @as(u32, 0xffffffff),
+        else => @compileError("not implemented"),
+    });
+    const xor_mask = if (is_pos) all_ones else 0;
+    return (value ^ xor_mask) + @as(T, @boolToInt(is_pos));
+}
+
+// For a 'simple' outline, decodes both X and Y coordinates for each point of the outline. */
+export fn simple_points(
+    font: *c.SFT_Font,
+    offset: c.uint_fast32_t,
+    numPts: c.uint_fast16_t,
+    flags: [*]u8,
+    points: [*]c.Point,
+) c_int {
+    var off = offset;
+    const Accum = i32;
+    {
+        var accum: Accum = 0;
+        var i: c.uint_fast16_t = 0;
+        while (i < numPts) : (i += 1) {
+	    if ((flags[i] & ttf.x_change_is_small) != 0) {
+	        if (!is_safe_offset_zig(font, off, 1))
+		    return -1;
+	        const value = getu8(font, off);
+                off += 1;
+	        const is_pos = (flags[i] & ttf.x_change_is_positive) != 0;
+                accum -= resolveSign(Accum, is_pos, value);
+	    } else if (0 == (flags[i] & ttf.x_change_is_zero)) {
+	        if (!is_safe_offset_zig(font, off, 2))
+		    return -1;
+	        accum += geti16(font, off);
+	        off += 2;
+	    }
+	    points[i].x = @intToFloat(f64, accum);
+        }
+    }
+
+    {
+        var accum: Accum = 0;
+        var i: c.uint_fast16_t = 0;
+        while (i < numPts) : (i += 1) {
+	    if ((flags[i] & ttf.y_change_is_small) != 0) {
+	        if (!is_safe_offset_zig(font, off, 1))
+		    return -1;
+	        const value = getu8(font, off);
+                off += 1;
+	        const is_pos = (flags[i] & ttf.y_change_is_positive) != 0;
+                accum -= resolveSign(Accum, is_pos, value);
+	    } else if (0 == (flags[i] & ttf.y_change_is_zero)) {
+	        if (!is_safe_offset_zig(font, off, 2))
+		    return -1;
+	        accum += geti16(font, off);
+	        off += 2;
+	    }
+	    points[i].y = @intToFloat(f64, accum);
+        }
+    }
+
     return 0;
 }
 

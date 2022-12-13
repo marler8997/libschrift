@@ -243,50 +243,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 	return 0;
 }
 
-/* For a 'simple' outline, decodes both X and Y coordinates for each point of the outline. */
-static int
-simple_points(SFT_Font *font, uint_fast32_t offset, uint_fast16_t numPts, uint8_t *flags, Point *points)
-{
-	long accum, value, bit;
-	uint_fast16_t i;
-
-	accum = 0L;
-	for (i = 0; i < numPts; ++i) {
-		if (flags[i] & X_CHANGE_IS_SMALL) {
-			if (!is_safe_offset(font, offset, 1))
-				return -1;
-			value = (long) getu8(font, offset++);
-			bit = !!(flags[i] & X_CHANGE_IS_POSITIVE);
-			accum -= (value ^ -bit) + bit;
-		} else if (!(flags[i] & X_CHANGE_IS_ZERO)) {
-			if (!is_safe_offset(font, offset, 2))
-				return -1;
-			accum += geti16(font, offset);
-			offset += 2;
-		}
-		points[i].x = (double) accum;
-	}
-
-	accum = 0L;
-	for (i = 0; i < numPts; ++i) {
-		if (flags[i] & Y_CHANGE_IS_SMALL) {
-			if (!is_safe_offset(font, offset, 1))
-				return -1;
-			value = (long) getu8(font, offset++);
-			bit = !!(flags[i] & Y_CHANGE_IS_POSITIVE);
-			accum -= (value ^ -bit) + bit;
-		} else if (!(flags[i] & Y_CHANGE_IS_ZERO)) {
-			if (!is_safe_offset(font, offset, 2))
-				return -1;
-			accum += geti16(font, offset);
-			offset += 2;
-		}
-		points[i].y = (double) accum;
-	}
-
-	return 0;
-}
-
 static int
 decode_contour(uint8_t *flags, uint_fast16_t basePoint, uint_fast16_t count, Outline *outl)
 {
