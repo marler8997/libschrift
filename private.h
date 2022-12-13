@@ -69,7 +69,6 @@ struct Raster
 //static int  tesselate_curve(Curve curve, Outline *outl);
 /*static*/ int  tesselate_curves(Outline *outl);
 /* silhouette rasterization */
-/*static*/ void draw_line(Raster buf, Point origin, Point goal);
 /*static*/ void draw_lines(Outline *outl, Raster buf);
 /* glyph rendering */
 /*static*/ int  render_outline(Outline *outl, double transform[6], SFT_Image image);

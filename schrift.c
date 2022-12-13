@@ -60,9 +60,6 @@
 #define GOT_AN_X_AND_Y_SCALE       0x040
 #define GOT_A_SCALE_MATRIX         0x080
 
-/* macros */
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#define SIGN(x)   (((x) > 0) - ((x) < 0))
 /* Allocate values on the stack if they are small enough, else spill to heap. */
 #define STACK_ALLOC(var, type, thresh, count) \
 	type var##_stack_[thresh]; \
@@ -72,9 +69,6 @@
 
 /* structs */
 /* function declarations */
-/* generic utility functions */
-static inline int fast_floor(double x);
-static inline int fast_ceil (double x);
 /* simple mathematical operations */
 static void transform_points(unsigned int numPts, Point *points, double trf[6]);
 static void clip_points(unsigned int numPts, Point *points, double width, double height);
@@ -161,21 +155,6 @@ sft_kerning(const SFT *sft, SFT_Glyph leftGlyph, SFT_Glyph rightGlyph,
 	return 0;
 }
 
-/* TODO maybe we should use long here instead of int. */
-static inline int
-fast_floor(double x)
-{
-	int i = (int) x;
-	return i - (i > x);
-}
-
-static inline int
-fast_ceil(double x)
-{
-	int i = (int) x;
-	return i + (i < x);
-}
-
 static inline uint_least8_t
 getu8(SFT_Font *font, uint_fast32_t offset)
 {
@@ -235,91 +214,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 		return -1;
 	*glyph = getu16(font, table + 4 + 2 * charCode);
 	return 0;
-}
-
-/* Draws a line into the buffer. Uses a custom 2D raycasting algorithm to do so. */
-/*static*/ void
-draw_line(Raster buf, Point origin, Point goal)
-{
-	Point delta;
-	Point nextCrossing;
-	Point crossingIncr;
-	double halfDeltaX;
-	double prevDistance = 0.0, nextDistance;
-	double xAverage, yDifference;
-	struct { int x, y; } pixel;
-	struct { int x, y; } dir;
-	int step, numSteps = 0;
-	Cell *restrict cptr, cell;
-
-	delta.x = goal.x - origin.x;
-	delta.y = goal.y - origin.y;
-	dir.x = SIGN(delta.x);
-	dir.y = SIGN(delta.y);
-
-	if (!dir.y) {
-		return;
-	}
-	
-	crossingIncr.x = dir.x ? fabs(1.0 / delta.x) : 1.0;
-	crossingIncr.y = fabs(1.0 / delta.y);
-
-	if (!dir.x) {
-		pixel.x = fast_floor(origin.x);
-		nextCrossing.x = 100.0;
-	} else {
-		if (dir.x > 0) {
-			pixel.x = fast_floor(origin.x);
-			nextCrossing.x = (origin.x - pixel.x) * crossingIncr.x;
-			nextCrossing.x = crossingIncr.x - nextCrossing.x;
-			numSteps += fast_ceil(goal.x) - fast_floor(origin.x) - 1;
-		} else {
-			pixel.x = fast_ceil(origin.x) - 1;
-			nextCrossing.x = (origin.x - pixel.x) * crossingIncr.x;
-			numSteps += fast_ceil(origin.x) - fast_floor(goal.x) - 1;
-		}
-	}
-
-	if (dir.y > 0) {
-		pixel.y = fast_floor(origin.y);
-		nextCrossing.y = (origin.y - pixel.y) * crossingIncr.y;
-		nextCrossing.y = crossingIncr.y - nextCrossing.y;
-		numSteps += fast_ceil(goal.y) - fast_floor(origin.y) - 1;
-	} else {
-		pixel.y = fast_ceil(origin.y) - 1;
-		nextCrossing.y = (origin.y - pixel.y) * crossingIncr.y;
-		numSteps += fast_ceil(origin.y) - fast_floor(goal.y) - 1;
-	}
-
-	nextDistance = MIN(nextCrossing.x, nextCrossing.y);
-	halfDeltaX = 0.5 * delta.x;
-
-	for (step = 0; step < numSteps; ++step) {
-		xAverage = origin.x + (prevDistance + nextDistance) * halfDeltaX;
-		yDifference = (nextDistance - prevDistance) * delta.y;
-		cptr = &buf.cells[pixel.y * buf.width + pixel.x];
-		cell = *cptr;
-		cell.cover += yDifference;
-		xAverage -= (double) pixel.x;
-		cell.area += (1.0 - xAverage) * yDifference;
-		*cptr = cell;
-		prevDistance = nextDistance;
-		int alongX = nextCrossing.x < nextCrossing.y;
-		pixel.x += alongX ? dir.x : 0;
-		pixel.y += alongX ? 0 : dir.y;
-		nextCrossing.x += alongX ? crossingIncr.x : 0.0;
-		nextCrossing.y += alongX ? 0.0 : crossingIncr.y;
-		nextDistance = MIN(nextCrossing.x, nextCrossing.y);
-	}
-
-	xAverage = origin.x + (prevDistance + 1.0) * halfDeltaX;
-	yDifference = (1.0 - prevDistance) * delta.y;
-	cptr = &buf.cells[pixel.y * buf.width + pixel.x];
-	cell = *cptr;
-	cell.cover += yDifference;
-	xAverage -= (double) pixel.x;
-	cell.area += (1.0 - xAverage) * yDifference;
-	*cptr = cell;
 }
 
 /*static*/ int

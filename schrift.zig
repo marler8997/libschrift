@@ -1049,6 +1049,99 @@ export fn tesselate_curves(outline: *c.Outline) c_int {
     return 0;
 }
 
+fn sign(x: f64) i2 {
+    if (x > 0) return 1;
+    if (x < 0) return -1;
+    return 0;
+}
+fn fast_floor(x: f64) c_int {
+    return @floatToInt(c_int, std.math.floor(x));
+}
+fn fast_ceil(x: f64) c_int {
+    return @floatToInt(c_int, std.math.ceil(x));
+}
+
+// Draws a line into the buffer. Uses a custom 2D raycasting algorithm to do so.
+fn draw_line(buf: c.Raster, origin: c.Point, goal: c.Point) void {
+    const delta = c.Point{
+        .x = goal.x - origin.x,
+        .y = goal.y - origin.y,
+    };
+    const dir = struct { x: i2, y: i2 }{
+        .x = sign(delta.x),
+        .y = sign(delta.y),
+    };
+
+    if (dir.y == 0) {
+	return;
+    }
+    const crossingIncr = c.Point{
+        .x = if (dir.x != 0) std.math.fabs(1.0 / delta.x) else 1.0,
+        .y = std.math.fabs(1.0 / delta.y),
+    };
+
+    var pixel: struct { x: i32, y: i32 } = undefined;
+    //struct { int x, y; } pixel;
+    var nextCrossing: c.Point = undefined;
+    var numSteps: c_int = 0;
+    if (dir.x == 0) {
+	pixel.x = fast_floor(origin.x);
+	nextCrossing.x = 100.0;
+    } else {
+	if (dir.x > 0) {
+	    pixel.x = fast_floor(origin.x);
+	    nextCrossing.x = (origin.x - @intToFloat(f64, pixel.x)) * crossingIncr.x;
+	    nextCrossing.x = crossingIncr.x - nextCrossing.x;
+	    numSteps += fast_ceil(goal.x) - fast_floor(origin.x) - 1;
+	} else {
+	    pixel.x = fast_ceil(origin.x) - 1;
+	    nextCrossing.x = (origin.x - @intToFloat(f64, pixel.x)) * crossingIncr.x;
+	    numSteps += fast_ceil(origin.x) - fast_floor(goal.x) - 1;
+	}
+    }
+
+    if (dir.y > 0) {
+	pixel.y = fast_floor(origin.y);
+	nextCrossing.y = (origin.y - @intToFloat(f64, pixel.y)) * crossingIncr.y;
+	nextCrossing.y = crossingIncr.y - nextCrossing.y;
+	numSteps += fast_ceil(goal.y) - fast_floor(origin.y) - 1;
+    } else {
+	pixel.y = fast_ceil(origin.y) - 1;
+	nextCrossing.y = (origin.y - @intToFloat(f64, pixel.y)) * crossingIncr.y;
+	numSteps += fast_ceil(origin.y) - fast_floor(goal.y) - 1;
+    }
+
+    var nextDistance = std.math.min(nextCrossing.x, nextCrossing.y);
+    const halfDeltaX = 0.5 * delta.x;
+    var prevDistance: f64 = 0.0;
+    var step: c_int = 0;
+    while (step < numSteps) : (step += 1) {
+	var xAverage = origin.x + (prevDistance + nextDistance) * halfDeltaX;
+	const yDifference = (nextDistance - prevDistance) * delta.y;
+	const cptr = &buf.cells[@intCast(usize, pixel.y * buf.width + pixel.x)];
+	var cell = cptr.*;
+	cell.cover += yDifference;
+	xAverage -= @intToFloat(f64, pixel.x);
+	cell.area += (1.0 - xAverage) * yDifference;
+	cptr.* = cell;
+	prevDistance = nextDistance;
+	const alongX = nextCrossing.x < nextCrossing.y;
+	pixel.x += if (alongX) dir.x else 0;
+	pixel.y += if (alongX) 0 else dir.y;
+	nextCrossing.x += if (alongX) crossingIncr.x else 0.0;
+	nextCrossing.y += if (alongX) 0.0 else crossingIncr.y;
+	nextDistance = std.math.min(nextCrossing.x, nextCrossing.y);
+    }
+
+    var xAverage = origin.x + (prevDistance + 1.0) * halfDeltaX;
+    const yDifference = (1.0 - prevDistance) * delta.y;
+    const cptr = &buf.cells[@intCast(usize, pixel.y * buf.width + pixel.x)];
+    var cell = cptr.*;
+    cell.cover += yDifference;
+    xAverage -= @intToFloat(f64, pixel.x);
+    cell.area += (1.0 - xAverage) * yDifference;
+    cptr.* = cell;
+}
 
 export fn draw_lines(outline: *c.Outline, buf: c.Raster) void {
     var i: usize = 0;
@@ -1056,7 +1149,7 @@ export fn draw_lines(outline: *c.Outline, buf: c.Raster) void {
         const line = outline.lines[i];
         const origin = outline.points[line.beg];
         const goal = outline.points[line.end];
-        c.draw_line(buf, origin, goal);
+        draw_line(buf, origin, goal);
     }
 }
 
