@@ -1041,7 +1041,7 @@ fn decode_outline(font: *Font, offset: c.uint_fast32_t, recDepth: u8, outl: *Out
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
-fn is_flat(outline: *Outline, curve: Curve) c_int {
+fn is_flat(outline: *Outline, curve: Curve) bool {
     const maxArea2: f64 = 2.0;
     const a = outline.points.items.ptr[curve.beg];
     const b = outline.points.items.ptr[curve.ctrl];
@@ -1049,10 +1049,7 @@ fn is_flat(outline: *Outline, curve: Curve) c_int {
     const g = Point{ .x = b.x-a.x, .y = b.y-a.y };
     const h = Point{ .x = cpoint.x-a.x, .y = cpoint.y-a.y };
     const area2 = std.math.fabs(g.x*h.y-h.x*g.y);
-    return if (area2 <= maxArea2) 1 else 0;
-}
-fn is_flat_zig(outline: *Outline, curve: Curve) bool {
-    return is_flat(outline, curve) != 0;
+    return area2 <= maxArea2;
 }
 
 fn tesselate_curve(curve_in: Curve, outline: *Outline) !void {
@@ -1065,7 +1062,7 @@ fn tesselate_curve(curve_in: Curve, outline: *Outline) !void {
     var top: usize = 0;
     var curve = curve_in;
     while (true) {
-	if (is_flat_zig(outline, curve) or top >= STACK_SIZE) {
+	if (is_flat(outline, curve) or top >= STACK_SIZE) {
 	    if (outline.lines.items.len >= outline.lines.capacity)
                 try grow_lines(outline);
 	    outline.lines.items.ptr[outline.lines.items.len] = .{ .beg = curve.beg, .end = curve.end };
