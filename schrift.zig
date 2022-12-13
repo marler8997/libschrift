@@ -12,6 +12,7 @@ const ttf = struct {
     pub const file_magic_one = 0x00010000;
     pub const file_magic_two = 0x74727565;
 
+    pub const point_is_on_curve     = 0x01;
     pub const x_change_is_small     = 0x02;
     pub const y_change_is_small     = 0x04;
     pub const repeat_flag           = 0x08;
@@ -719,6 +720,96 @@ export fn simple_points(
 	    }
 	    points[i].y = @intToFloat(f64, accum);
         }
+    }
+
+    return 0;
+}
+
+export fn decode_contour(
+    flags_start: [*]u8,
+    basePointStart: c.uint_fast16_t,
+    count_start: c.uint_fast16_t,
+    outl: *c.Outline,
+) c_int {
+    // Skip contours with less than two points, since the following algorithm can't handle them and
+    // they should appear invisible either way (because they don't have any area).
+    if (count_start < 2) return 0;
+    std.debug.assert(basePointStart <= std.math.maxInt(u16) - count_start);
+
+    var flags = flags_start;
+    var basePoint = basePointStart;
+    var count = count_start;
+    const looseEnd: c.uint_least16_t = blk: {
+        if (0 != (flags[0] & ttf.point_is_on_curve)) {
+            const looseEnd = @intCast(c.uint_least16_t, basePoint);
+            basePoint += 1;
+            flags += 1;
+            count -= 1;
+            break :blk looseEnd;
+        }
+        if (0 != (flags[count - 1] & ttf.point_is_on_curve)) {
+            count -= 1;
+	    break :blk @intCast(c.uint_least16_t, basePoint + count);
+        }
+
+	if (outl.numPoints >= outl.capPoints and grow_points(outl) < 0)
+	    return -1;
+
+	outl.points[outl.numPoints] = midpoint(
+	    outl.points[basePoint],
+	    outl.points[basePoint + count - 1]);
+        const looseEnd = outl.numPoints;
+        outl.numPoints += 1;
+        break :blk looseEnd;
+    };
+    var beg = looseEnd;
+    var opt_ctrl: ?c.uint_least16_t = null;
+    var i: c.uint_fast16_t = 0;
+    while (i < count) : (i += 1) {
+	// cur can't overflow because we ensure that basePoint + count < 0xFFFF before calling decode_contour().
+	const cur = @intCast(c.uint_least16_t, basePoint + i);
+	if (0 != (flags[i] & ttf.point_is_on_curve)) {
+	    if (opt_ctrl) |ctrl| {
+		if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
+		    return -1;
+		outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = cur, .ctrl = ctrl };
+                outl.numCurves += 1;
+	    } else {
+		if (outl.numLines >= outl.capLines and grow_lines(outl) < 0)
+		    return -1;
+		outl.lines[outl.numLines] = c.Line{ .beg = beg, .end = cur };
+                outl.numLines += 1;
+	    }
+	    beg = cur;
+            opt_ctrl = null;
+	} else {
+	    if (opt_ctrl) |ctrl| {
+		const center: c.uint_least16_t = outl.numPoints;
+		if (outl.numPoints >= outl.capPoints and grow_points(outl) < 0)
+		    return -1;
+		outl.points[center] = midpoint(outl.points[ctrl], outl.points[cur]);
+                outl.numPoints += 1;
+
+		if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
+		    return -1;
+		outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = center, .ctrl = ctrl };
+                outl.numCurves += 1;
+
+		beg = center;
+	    }
+	    opt_ctrl = cur;
+	}
+    }
+    if (opt_ctrl) |ctrl| {
+	if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
+	    return -1;
+	outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = looseEnd, .ctrl = ctrl };
+        outl.numCurves += 1;
+    } else {
+	if (outl.numLines >= outl.capLines and grow_lines(outl) < 0)
+	    return -1;
+	outl.lines[outl.numLines] = c.Line{ .beg = beg, .end = looseEnd };
+        outl.numLines += 1;
     }
 
     return 0;
