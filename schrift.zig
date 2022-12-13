@@ -135,51 +135,61 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
     return 0;
 }
 
+const win32 = struct {
+    const BOOL = i32;
+    const PAGE_READONLY = 2;
+    pub extern "kernel32" fn CreateFileMappingW(
+        hFile: std.os.windows.HANDLE,
+        lpFileMappingAttributes: ?*anyopaque,
+        flProtect: u32,
+        dwMaximumSizeHigh: u32,
+        dwMaximumSizeLow: u32,
+        lpName: ?[*:0]const u16,
+    ) callconv(@import("std").os.windows.WINAPI) ?std.os.windows.HANDLE;
+    pub const FILE_MAP_READ = 4;
+    pub extern "kernel32" fn MapViewOfFile(
+        hFileMappingObject: std.os.windows.HANDLE,
+        dwDesiredAccess: u32,
+        dwFileOffsetHigh: u32,
+        dwFileOffsetLow: u32,
+        dwNumberOfBytesToMap: ?*anyopaque,
+    ) callconv(@import("std").os.windows.WINAPI) ?[*]u8;
+    pub extern "kernel32" fn UnmapViewOfFile(
+        lpBaseAddress: *const anyopaque,
+    ) callconv(@import("std").os.windows.WINAPI) BOOL;
+};
+
 fn map_file(font: *c.SFT_Font, filename: [*:0]const u8) !void {
+    var file = try std.fs.cwd().openFileZ(filename, .{});
+    defer file.close();
+    const file_size = try file.getEndPos();
+    if (file_size > std.math.maxInt(u32))
+        return error.FileTooBig;
+    font.size = @intCast(u32, file_size);
     if (builtin.os.tag == .windows) {
-        @panic("todo");
-//	HANDLE file;
-//	DWORD high, low;
-//
-//	font->mapping = NULL;
-//	font->memory  = NULL;
-//
-//	file = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-//	if (file == INVALID_HANDLE_VALUE) {
-//		return -1;
-//	}
-//
-//	low = GetFileSize(file, &high);
-//	if (low == INVALID_FILE_SIZE) {
-//		CloseHandle(file);
-//		return -1;
-//	}
-//
-//	font->size = (size_t)high << (8 * sizeof(DWORD)) | low;
-//
-//	font->mapping = CreateFileMapping(file, NULL, PAGE_READONLY, high, low, NULL);
-//	if (!font->mapping) {
-//		CloseHandle(file);
-//		return -1;
-//	}
-//
-//	CloseHandle(file);
-//
-//	font->memory = MapViewOfFile(font->mapping, FILE_MAP_READ, 0, 0, 0);
-//	if (!font->memory) {
-//		CloseHandle(font->mapping);
-//		font->mapping = NULL;
-//		return -1;
-//	}
-//
-//	return 0;
+        font.mapping = win32.CreateFileMappingW(
+            file.handle,
+            null,
+            win32.PAGE_READONLY,
+            0, font.size,
+            null,
+        ) orelse switch (std.os.windows.kernel32.GetLastError()) {
+            //.ACCESS_DENIED => return error.PermissionDenied,
+            else => |err| return std.os.windows.unexpectedError(err),
+        };
+        errdefer {
+            std.os.windows.CloseHandle(font.mapping.?);
+            font.mapping = null;
+        }
+        font.memory = win32.MapViewOfFile(
+            font.mapping.?,
+            win32.FILE_MAP_READ,
+            0, 0, null,
+        ) orelse switch (std.os.windows.kernel32.GetLastError()) {
+            //.ACCESS_DENIED => return error.PermissionDenied,
+            else => |err| return std.os.windows.unexpectedError(err),
+        };
     } else {
-        var file = try std.fs.cwd().openFileZ(filename, .{});
-        defer file.close();
-        const file_size = try file.getEndPos();
-        if (file_size > std.math.maxInt(u32))
-            return error.FileTooBig;
-        font.size = @intCast(u32, file_size);
         const mem = try std.os.mmap(null, font.size, std.os.PROT.READ, std.os.MAP.PRIVATE, file.handle, 0);
         std.debug.assert(mem.len == font.size);
         font.memory = mem.ptr;
@@ -188,15 +198,8 @@ fn map_file(font: *c.SFT_Font, filename: [*:0]const u8) !void {
 
 fn unmap_file(font: *c.SFT_Font) void {
     if (builtin.os.tag == .windows) {
-        @panic("todo");
-//	if (font->memory) {
-//	    UnmapViewOfFile(font->memory);
-//	    font->memory = NULL;
-//	}
-//	if (font->mapping) {
-//	    CloseHandle(font->mapping);
-//	    font->mapping = NULL;
-//	}
+        std.debug.assert(0 != win32.UnmapViewOfFile(font.memory));
+        std.os.windows.CloseHandle(font.mapping.?);
     } else {
 	//std.debug.assert(font.memory != std.os.MAP.FAILED);
 	std.os.munmap(@alignCast(std.mem.page_size, font.memory)[0 .. font.size]);

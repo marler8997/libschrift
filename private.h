@@ -27,6 +27,10 @@ struct Outline
 	uint_least16_t capLines;
 };
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 struct SFT_Font
 {
 	const uint8_t *memory;
