@@ -90,10 +90,6 @@ static inline int_least8_t   geti8 (SFT_Font *font, uint_fast32_t offset);
 static inline uint_least16_t getu16(SFT_Font *font, uint_fast32_t offset);
 static inline int_least16_t  geti16(SFT_Font *font, uint_fast32_t offset);
 static inline uint_least32_t getu32(SFT_Font *font, uint_fast32_t offset);
-/* decoding outlines */
-static int  decode_contour(uint8_t *flags, uint_fast16_t basePoint, uint_fast16_t count, Outline *outl);
-static int  simple_outline(SFT_Font *font, uint_fast32_t offset, unsigned int numContours, Outline *outl);
-static int  compound_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
 /* post-processing */
 /*static*/ void post_process(Raster buf, uint8_t *image);
 
@@ -239,24 +235,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 		return -1;
 	*glyph = getu16(font, table + 4 + 2 * charCode);
 	return 0;
-}
-
-/*static*/ int
-decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl)
-{
-	int numContours;
-	if (!is_safe_offset(font, offset, 10))
-		return -1;
-	numContours = geti16(font, offset);
-	if (numContours > 0) {
-		/* Glyph has a 'simple' outline consisting of a number of contours. */
-		return simple_outline(font, offset + 10, (unsigned int) numContours, outl);
-	} else if (numContours < 0) {
-		/* Glyph has a compound outline combined from mutiple other outlines. */
-		return compound_outline(font, offset + 10, recDepth, outl);
-	} else {
-		return 0;
-	}
 }
 
 /* Draws a line into the buffer. Uses a custom 2D raycasting algorithm to do so. */

@@ -109,7 +109,7 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
     metrics.advanceWidth    = @intToFloat(f64, hor.advance_width) * xScale;
     metrics.leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScale + sft.xOffset;
 
-    const outline = outline_offset_zig(sft.font, glyph) catch return -1;
+    const outline = outline_offset(sft.font, glyph) catch return -1;
     if (outline == 0)
 	return 0;
     const bbox = glyph_bbox(sft, outline) catch return -1;
@@ -120,7 +120,7 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
 }
 
 export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
-    const outline = outline_offset_zig(sft.font, glyph) catch return -1;
+    const outline = outline_offset(sft.font, glyph) catch return -1;
     if (outline == 0)
 	return 0;
     const bbox = glyph_bbox(sft, outline) catch return -1;
@@ -144,8 +144,7 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
     defer free_outline(&outl);
     init_outline(&outl) catch return -1;
 
-    if (c.decode_outline(sft.font, outline, 0, &outl) < 0)
-        return -1;
+    decode_outline(sft.font, outline, 0, &outl) catch return -1;
 
     if (c.render_outline(&outl, &transform, image) < 0)
         return -1;
@@ -601,15 +600,8 @@ fn glyph_bbox(sft: *c.SFT, outline: c.uint_fast32_t) ![4]c_int {
     };
 }
 
-export fn outline_offset(font: *c.SFT_Font, glyph: c.SFT_Glyph, offset: *c.uint_fast32_t) c_int {
-    if (outline_offset_zig(font, glyph)) |o| {
-        offset.* = o;
-        return 0;
-    } else |_| return -1;
-}
-
 // Returns the offset into the font that the glyph's outline is stored at.
-fn outline_offset_zig(font: *c.SFT_Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
+fn outline_offset(font: *c.SFT_Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
     var loca: c.uint_fast32_t = undefined;
     if (gettable(font, "loca", &loca) < 0)
 	return error.InvalidTtfNoLocaTable;
@@ -728,15 +720,15 @@ fn simple_points(
     }
 }
 
-export fn decode_contour(
+fn decode_contour(
     flags_start: [*]u8,
     basePointStart: c.uint_fast16_t,
     count_start: c.uint_fast16_t,
     outl: *c.Outline,
-) c_int {
+) !void {
     // Skip contours with less than two points, since the following algorithm can't handle them and
     // they should appear invisible either way (because they don't have any area).
-    if (count_start < 2) return 0;
+    if (count_start < 2) return;
     std.debug.assert(basePointStart <= std.math.maxInt(u16) - count_start);
 
     var flags = flags_start;
@@ -756,7 +748,7 @@ export fn decode_contour(
         }
 
 	if (outl.numPoints >= outl.capPoints and grow_points(outl) < 0)
-	    return -1;
+	    return error.InvalidTtfBadOutline;
 
 	outl.points[outl.numPoints] = midpoint(
 	    outl.points[basePoint],
@@ -774,12 +766,12 @@ export fn decode_contour(
 	if (0 != (flags[i] & ttf.point_is_on_curve)) {
 	    if (opt_ctrl) |ctrl| {
 		if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
-		    return -1;
+	            return error.InvalidTtfBadOutline;
 		outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = cur, .ctrl = ctrl };
                 outl.numCurves += 1;
 	    } else {
 		if (outl.numLines >= outl.capLines and grow_lines(outl) < 0)
-		    return -1;
+	            return error.InvalidTtfBadOutline;
 		outl.lines[outl.numLines] = c.Line{ .beg = beg, .end = cur };
                 outl.numLines += 1;
 	    }
@@ -789,12 +781,12 @@ export fn decode_contour(
 	    if (opt_ctrl) |ctrl| {
 		const center: c.uint_least16_t = outl.numPoints;
 		if (outl.numPoints >= outl.capPoints and grow_points(outl) < 0)
-		    return -1;
+	            return error.InvalidTtfBadOutline;
 		outl.points[center] = midpoint(outl.points[ctrl], outl.points[cur]);
                 outl.numPoints += 1;
 
 		if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
-		    return -1;
+	            return error.InvalidTtfBadOutline;
 		outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = center, .ctrl = ctrl };
                 outl.numCurves += 1;
 
@@ -805,17 +797,15 @@ export fn decode_contour(
     }
     if (opt_ctrl) |ctrl| {
 	if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
-	    return -1;
+	    return error.InvalidTtfBadOutline;
 	outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = looseEnd, .ctrl = ctrl };
         outl.numCurves += 1;
     } else {
 	if (outl.numLines >= outl.capLines and grow_lines(outl) < 0)
-	    return -1;
+	    return error.InvalidTtfBadOutline;
 	outl.lines[outl.numLines] = c.Line{ .beg = beg, .end = looseEnd };
         outl.numLines += 1;
     }
-
-    return 0;
 }
 
 fn StackBuf(comptime T: type, comptime stack_len: usize) type {
@@ -836,36 +826,36 @@ fn stackBuf(comptime T: type, comptime stack_len: usize) StackBuf(T, stack_len) 
     return .{};
 }
 
-export fn simple_outline(
+fn simple_outline(
     font: *c.SFT_Font,
     offset_start: c.uint_fast32_t,
-    numContours: c_uint,
+    numContours: u15,
     outl: *c.Outline,
-) c_int {
+) !void {
     std.debug.assert(numContours > 0);
     const basePoint: c.uint_fast16_t = outl.numPoints;
 
     if (!is_safe_offset_zig(font, offset_start, numContours * 2 + 2))
-        return -1;
+	return error.InvalidTtfBadOutline;
     var numPts = getu16(font, offset_start + (numContours - 1) * 2);
     if (numPts >= std.math.maxInt(u16))
-        return -1;
+	return error.InvalidTtfBadOutline;
     numPts += 1;
     if (outl.numPoints > std.math.maxInt(u16) - numPts)
-        return -1;
+	return error.InvalidTtfBadOutline;
 
     // TODO: this should be a single realloc
     while (outl.capPoints < basePoint + numPts) {
 	if (grow_points(outl) < 0)
-            return -1;
+	    return error.InvalidTtfBadOutline;
     }
 
     var endPtsStackBuf = stackBuf(c.uint_fast16_t, 16);
-    const endPts = endPtsStackBuf.alloc(numContours) catch return -1;
+    const endPts = try endPtsStackBuf.alloc(numContours);
     defer endPtsStackBuf.free(endPts);
 
     var flagsStackBuf = stackBuf(u8, 128);
-    const flags = flagsStackBuf.alloc(numPts) catch return -1;
+    const flags = try flagsStackBuf.alloc(numPts);
     defer flagsStackBuf.free(flags);
 
     var offset = offset_start;
@@ -884,13 +874,13 @@ export fn simple_outline(
         var i: c_uint = 0;
         while (i < numContours - 1) : (i += 1) {
 	    if (endPts[i + 1] < endPts[i] + 1)
-                return -1;
+	        return error.InvalidTtfBadOutline;
         }
     }
     offset += 2 + @as(u32, getu16(font, offset));
 
-    offset = simple_flags(font, offset, numPts, flags) catch return -1;
-    simple_points(font, offset, numPts, flags, outl.points + basePoint) catch return -1;
+    offset = try simple_flags(font, offset, numPts, flags);
+    try simple_points(font, offset, numPts, flags, outl.points + basePoint);
     outl.numPoints = @intCast(c.uint_least16_t, outl.numPoints + numPts);
 
     var beg: c.uint_fast16_t = 0;
@@ -898,59 +888,61 @@ export fn simple_outline(
         var i: c_uint = 0;
         while (i < numContours) : (i += 1) {
 	    const count: c.uint_fast16_t = endPts[i] - beg + 1;
-	    if (decode_contour(flags + beg, basePoint + beg, count, outl) < 0)
-                return -1;
+	    try decode_contour(flags + beg, basePoint + beg, count, outl);
 	    beg = endPts[i] + 1;
         }
     }
-
-    return 0;
 }
 
-export fn compound_outline(font: *c.SFT_Font, offset_start: c.uint_fast32_t, recDepth: c_int, outl: *c.Outline) c_int {
+fn compound_outline(
+    font: *c.SFT_Font,
+    offset_start: c.uint_fast32_t,
+    recDepth: u8,
+    outl: *c.Outline,
+) !void {
     // Guard against infinite recursion (compound glyphs that have themselves as component).
     if (recDepth >= 4)
-	return -1;
+        return error.InvalidTtfOutlineTooRecursive;
     var offset = offset_start;
     while (true) {
         var local = [_]f64{0} ** 6;
 	if (!is_safe_offset_zig(font, offset, 4))
-	    return -1;
+            return error.InvalidTtfBadOutline;
 	const flags = getu16(font, offset);
 	const glyph = getu16(font, offset + 2);
 	offset += 4;
 	// We don't implement point matching, and neither does stb_truetype for that matter.
 	if (0 == (flags & ttf.actual_xy_offsets))
-	    return -1;
+            return error.TtfPointMatchingNotSupported;
 	// Read additional X and Y offsets (in FUnits) of this component.
 	if (0 != (flags & ttf.offsets_are_large)) {
 	    if (!is_safe_offset_zig(font, offset, 4))
-		return -1;
+                return error.InvalidTtfBadOutline;
 	    local[4] = @intToFloat(f64, geti16(font, offset));
 	    local[5] = @intToFloat(f64, geti16(font, offset + 2));
 	    offset += 4;
 	} else {
 	    if (!is_safe_offset_zig(font, offset, 2))
-		return -1;
+                return error.InvalidTtfBadOutline;
 	    local[4] = @intToFloat(f64, geti8(font, offset));
 	    local[5] = @intToFloat(f64, geti8(font, offset + 1));
 	    offset += 2;
 	}
 	if (0 != (flags & ttf.got_a_single_scale)) {
 	    if (!is_safe_offset_zig(font, offset, 2))
-		return -1;
+                return error.InvalidTtfBadOutline;
 	    local[0] = @intToFloat(f64, geti16(font, offset)) / 16384.0;
 	    local[3] = local[0];
 	    offset += 2;
 	} else if (0 != (flags & ttf.got_an_x_and_y_scale)) {
 	    if (!is_safe_offset_zig(font, offset, 4))
-		return -1;
+                return error.InvalidTtfBadOutline;
 	    local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
 	    local[3] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
 	    offset += 4;
 	} else if (0 != (flags & ttf.got_a_scale_matrix)) {
 	    if (!is_safe_offset_zig(font, offset, 8))
-		return -1;
+                return error.InvalidTtfBadOutline;
 	    local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
 	    local[1] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
 	    local[2] = @intToFloat(f64, geti16(font, offset + 4)) / 16384.0;
@@ -964,20 +956,28 @@ export fn compound_outline(font: *c.SFT_Font, offset_start: c.uint_fast32_t, rec
 	// But stb_truetype scales by the L2 norm. And FreeType2 doesn't scale at all.
 	// Furthermore, Microsoft's spec doesn't even mention anything like this.
 	// It's almost as if nobody ever uses this feature anyway.
-        var outline: c.uint_fast32_t = undefined;
-	if (outline_offset(font, glyph, &outline) < 0)
-	    return -1;
+        const outline = try outline_offset(font, glyph);
 	if (outline != 0) {
 	    const basePoint = outl.numPoints;
-	    if (c.decode_outline(font, outline, recDepth + 1, outl) < 0)
-	        return -1;
+	    try decode_outline(font, outline, recDepth + 1, outl);
 	    transform_points(outl.numPoints - basePoint, outl.points + basePoint, &local);
 	}
 
         if (0 == (flags & ttf.there_are_more_components)) break;
     }
+}
 
-    return 0;
+fn decode_outline(font: *c.SFT_Font, offset: c.uint_fast32_t, recDepth: u8, outl: *c.Outline) !void {
+    if (!is_safe_offset_zig(font, offset, 10))
+	return error.InvalidTtfBadOutline;
+    const numContours = geti16(font, offset);
+    if (numContours > 0) {
+	// Glyph has a 'simple' outline consisting of a number of contours.
+	return simple_outline(font, offset + 10, @intCast(u15, numContours), outl);
+    } else if (numContours < 0) {
+	// Glyph has a compound outline combined from mutiple other outlines.
+	return compound_outline(font, offset + 10, recDepth, outl);
+    }
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.

@@ -64,9 +64,6 @@ struct Raster
 /* TTF parsing utilities */
 /*static*/ inline int is_safe_offset(SFT_Font *font, uint_fast32_t offset, uint_fast32_t margin);
 /*static*/ int gettable(SFT_Font *font, const char tag[4], uint_fast32_t *offset);
-/* decoding outlines */
-/*static*/ int  outline_offset(SFT_Font *font, uint_fast32_t glyph, uint_fast32_t *offset);
-/*static*/ int  decode_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
 /* tesselation */
 //static int  is_flat(Outline *outl, Curve curve);
 //static int  tesselate_curve(Curve curve, Outline *outl);
