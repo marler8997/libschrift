@@ -91,8 +91,6 @@ static inline uint_least16_t getu16(SFT_Font *font, uint_fast32_t offset);
 static inline int_least16_t  geti16(SFT_Font *font, uint_fast32_t offset);
 static inline uint_least32_t getu32(SFT_Font *font, uint_fast32_t offset);
 /* decoding outlines */
-static int  simple_flags(SFT_Font *font, uint_fast32_t *offset, uint_fast16_t numPts, uint8_t *flags);
-static int  simple_points(SFT_Font *font, uint_fast32_t offset, uint_fast16_t numPts, uint8_t *flags, Point *points);
 static int  decode_contour(uint8_t *flags, uint_fast16_t basePoint, uint_fast16_t count, Outline *outl);
 static int  simple_outline(SFT_Font *font, uint_fast32_t offset, unsigned int numContours, Outline *outl);
 static int  compound_outline(SFT_Font *font, uint_fast32_t offset, int recDepth, Outline *outl);
@@ -241,75 +239,6 @@ cmap_fmt6(SFT_Font *font, uint_fast32_t table, SFT_UChar charCode, SFT_Glyph *gl
 		return -1;
 	*glyph = getu16(font, table + 4 + 2 * charCode);
 	return 0;
-}
-
-static int
-simple_outline(SFT_Font *font, uint_fast32_t offset, unsigned int numContours, Outline *outl)
-{
-	uint_fast16_t *endPts = NULL;
-	uint8_t *flags = NULL;
-	uint_fast16_t numPts;
-	unsigned int i;
-
-	assert(numContours > 0);
-
-	uint_fast16_t basePoint = outl->numPoints;
-
-	if (!is_safe_offset(font, offset, numContours * 2 + 2))
-		goto failure;
-	numPts = getu16(font, offset + (numContours - 1) * 2);
-	if (numPts >= UINT16_MAX)
-		goto failure;
-	numPts++;
-	if (outl->numPoints > UINT16_MAX - numPts)
-		goto failure;
-
-	while (outl->capPoints < basePoint + numPts) {
-		if (grow_points(outl) < 0)
-			goto failure;
-	}
-	
-	STACK_ALLOC(endPts, uint_fast16_t, 16, numContours);
-	if (endPts == NULL)
-		goto failure;
-	STACK_ALLOC(flags, uint8_t, 128, numPts);
-	if (flags == NULL)
-		goto failure;
-
-	for (i = 0; i < numContours; ++i) {
-		endPts[i] = getu16(font, offset);
-		offset += 2;
-	}
-	/* Ensure that endPts are never falling.
-	 * Falling endPts have no sensible interpretation and most likely only occur in malicious input.
-	 * Therefore, we bail, should we ever encounter such input. */
-	for (i = 0; i < numContours - 1; ++i) {
-		if (endPts[i + 1] < endPts[i] + 1)
-			goto failure;
-	}
-	offset += 2U + getu16(font, offset);
-
-	if (simple_flags(font, &offset, numPts, flags) < 0)
-		goto failure;
-	if (simple_points(font, offset, numPts, flags, outl->points + basePoint) < 0)
-		goto failure;
-	outl->numPoints = (uint_least16_t) (outl->numPoints + numPts);
-
-	uint_fast16_t beg = 0;
-	for (i = 0; i < numContours; ++i) {
-		uint_fast16_t count = endPts[i] - beg + 1;
-		if (decode_contour(flags + beg, basePoint + beg, count, outl) < 0)
-			goto failure;
-		beg = endPts[i] + 1;
-	}
-
-	STACK_FREE(endPts);
-	STACK_FREE(flags);
-	return 0;
-failure:
-	STACK_FREE(endPts);
-	STACK_FREE(flags);
-	return -1;
 }
 
 static int

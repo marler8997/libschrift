@@ -635,8 +635,8 @@ fn outline_offset_zig(font: *c.SFT_Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
 }
 
 // For a 'simple' outline, determines each point of the outline with a set of flags.
-export fn simple_flags(font: *c.SFT_Font, offset_ref: *c.uint_fast32_t, numPts: c.uint_fast16_t, flags: [*]u8) c_int {
-    var off = offset_ref.*;
+fn simple_flags(font: *c.SFT_Font, offset: c.uint_fast32_t, numPts: c.uint_fast16_t, flags: [*]u8) !c.uint_fast32_t {
+    var off = offset;
     var repeat: u8 = 0;
     var value: u8 = 0;
     var point_index: c.uint_fast16_t = 0;
@@ -645,20 +645,19 @@ export fn simple_flags(font: *c.SFT_Font, offset_ref: *c.uint_fast32_t, numPts: 
             repeat -= 1;
 	} else {
 	    if (!is_safe_offset_zig(font, off, 1))
-		return -1;
+		return error.InvalidTtfBadOutline;
 	    value = getu8(font, off);
             off += 1;
 	    if ((value & ttf.repeat_flag) != 0) {
 		if (!is_safe_offset_zig(font, off, 1))
-		    return -1;
+		    return error.InvalidTtfBadOutline;
 		repeat = getu8(font, off);
                 off += 1;
 	    }
 	}
 	flags[point_index] = value;
     }
-    offset_ref.* = off;
-    return 0;
+    return off;
 }
 
 fn resolveSign(comptime T: type, is_pos: bool, value: T) T {
@@ -671,13 +670,13 @@ fn resolveSign(comptime T: type, is_pos: bool, value: T) T {
 }
 
 // For a 'simple' outline, decodes both X and Y coordinates for each point of the outline. */
-export fn simple_points(
+fn simple_points(
     font: *c.SFT_Font,
     offset: c.uint_fast32_t,
     numPts: c.uint_fast16_t,
     flags: [*]u8,
     points: [*]c.Point,
-) c_int {
+) !void {
     var off = offset;
     const Accum = i32;
     {
@@ -686,14 +685,14 @@ export fn simple_points(
         while (i < numPts) : (i += 1) {
 	    if ((flags[i] & ttf.x_change_is_small) != 0) {
 	        if (!is_safe_offset_zig(font, off, 1))
-		    return -1;
+		    return error.InvalidTtfBadOutline;
 	        const value = getu8(font, off);
                 off += 1;
 	        const is_pos = (flags[i] & ttf.x_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
 	    } else if (0 == (flags[i] & ttf.x_change_is_zero)) {
 	        if (!is_safe_offset_zig(font, off, 2))
-		    return -1;
+		    return error.InvalidTtfBadOutline;
 	        accum += geti16(font, off);
 	        off += 2;
 	    }
@@ -707,22 +706,20 @@ export fn simple_points(
         while (i < numPts) : (i += 1) {
 	    if ((flags[i] & ttf.y_change_is_small) != 0) {
 	        if (!is_safe_offset_zig(font, off, 1))
-		    return -1;
+		    return error.InvalidTtfBadOutline;
 	        const value = getu8(font, off);
                 off += 1;
 	        const is_pos = (flags[i] & ttf.y_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
 	    } else if (0 == (flags[i] & ttf.y_change_is_zero)) {
 	        if (!is_safe_offset_zig(font, off, 2))
-		    return -1;
+		    return error.InvalidTtfBadOutline;
 	        accum += geti16(font, off);
 	        off += 2;
 	    }
 	    points[i].y = @intToFloat(f64, accum);
         }
     }
-
-    return 0;
 }
 
 export fn decode_contour(
@@ -810,6 +807,95 @@ export fn decode_contour(
 	    return -1;
 	outl.lines[outl.numLines] = c.Line{ .beg = beg, .end = looseEnd };
         outl.numLines += 1;
+    }
+
+    return 0;
+}
+
+fn StackBuf(comptime T: type, comptime stack_len: usize) type {
+    return struct {
+        buf: [stack_len]T = undefined,
+        fn alloc(self: *@This(), len: usize) error{OutOfMemory}![*]T {
+            if (len <= stack_len) return &self.buf;
+            return try malloc(T, len);
+        }
+        fn free(self: *@This(), ptr: [*]T) void {
+            if (ptr != &self.buf) {
+                c.free(ptr);
+            }
+        }
+    };
+}
+fn stackBuf(comptime T: type, comptime stack_len: usize) StackBuf(T, stack_len) {
+    return .{};
+}
+
+export fn simple_outline(
+    font: *c.SFT_Font,
+    offset_start: c.uint_fast32_t,
+    numContours: c_uint,
+    outl: *c.Outline,
+) c_int {
+    std.debug.assert(numContours > 0);
+    const basePoint: c.uint_fast16_t = outl.numPoints;
+
+    if (!is_safe_offset_zig(font, offset_start, numContours * 2 + 2))
+        return -1;
+    var numPts = getu16(font, offset_start + (numContours - 1) * 2);
+    if (numPts >= std.math.maxInt(u16))
+        return -1;
+    numPts += 1;
+    if (outl.numPoints > std.math.maxInt(u16) - numPts)
+        return -1;
+
+    // TODO: this should be a single realloc
+    while (outl.capPoints < basePoint + numPts) {
+	if (grow_points(outl) < 0)
+            return -1;
+    }
+
+    var endPtsStackBuf = stackBuf(c.uint_fast16_t, 16);
+    const endPts = endPtsStackBuf.alloc(numContours) catch return -1;
+    defer endPtsStackBuf.free(endPts);
+
+    var flagsStackBuf = stackBuf(u8, 128);
+    const flags = flagsStackBuf.alloc(numPts) catch return -1;
+    defer flagsStackBuf.free(flags);
+
+    var offset = offset_start;
+    {
+        var i: c_uint = 0;
+        while (i < numContours) : (i += 1) {
+	    endPts[i] = getu16(font, offset);
+	    offset += 2;
+        }
+    }
+
+    // Ensure that endPts are never falling.
+    // Falling endPts have no sensible interpretation and most likely only occur in malicious input.
+    // Therefore, we bail, should we ever encounter such input.
+    {
+        var i: c_uint = 0;
+        while (i < numContours - 1) : (i += 1) {
+	    if (endPts[i + 1] < endPts[i] + 1)
+                return -1;
+        }
+    }
+    offset += 2 + @as(u32, getu16(font, offset));
+
+    offset = simple_flags(font, offset, numPts, flags) catch return -1;
+    simple_points(font, offset, numPts, flags, outl.points + basePoint) catch return -1;
+    outl.numPoints = @intCast(c.uint_least16_t, outl.numPoints + numPts);
+
+    var beg: c.uint_fast16_t = 0;
+    {
+        var i: c_uint = 0;
+        while (i < numContours) : (i += 1) {
+	    const count: c.uint_fast16_t = endPts[i] - beg + 1;
+	    if (decode_contour(flags + beg, basePoint + beg, count, outl) < 0)
+                return -1;
+	    beg = endPts[i] + 1;
+        }
     }
 
     return 0;
