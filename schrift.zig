@@ -120,10 +120,8 @@ export fn sft_freefont(font: ?*c.SFT_Font) void {
 
 export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
     @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
-    var hhea: c.uint_fast32_t = undefined;
     const font = Font.fromC(sft.font orelse unreachable);
-    if (gettable(font, "hhea", &hhea) < 0)
-	return -1;
+    const hhea = (gettable(font, "hhea") catch return -1) orelse return -1;
     if (!is_safe_offset(font, hhea, 36))
 	return -1;
     const factor = sft.yScale / @intToFloat(f64, font.*.unitsPerEm);
@@ -272,15 +270,13 @@ fn init_font(font: *Font) !void {
     if (scalerType != ttf.file_magic_one and scalerType != ttf.file_magic_two)
 	return error.InvalidTtfBadMagic;
 
-    var head: c.uint_fast32_t = undefined;
-    if (gettable(font, "head", &head) < 0)
+    const head = (try gettable(font, "head")) orelse
 	return error.InvalidTtfNoHeadTable;
     if (!is_safe_offset(font, head, 54))
         return error.InvalidTtfBadHeadTable;
     font.unitsPerEm = getu16(font, head + 18);
     font.locaFormat = geti16(font, head + 50);
-    var hhea: c.uint_fast32_t = undefined;
-    if (gettable(font, "hhea", &hhea) < 0)
+    const hhea = (try gettable(font, "hhea")) orelse
         return error.InvalidTtfNoHheaTable;
     if (!is_safe_offset(font, hhea, 36))
         return error.InvalidTtfBadHheaTable;
@@ -465,14 +461,13 @@ fn getu32(font: *Font, offset: usize) u32 {
     return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.mem.ptr + offset));
 }
 
-fn gettable(font: *Font, tag: *const [4]u8, offset: *c.uint_fast32_t) c_int {
+fn gettable(font: *Font, tag: *const [4]u8) !?c.uint_fast32_t {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
     const numTables = getu16(font, 4);
     if (!is_safe_offset(font, 12, numTables * 16))
-	return -1;
-    const match = bsearch(tag, font.mem.ptr + 12, numTables, 16, cmpu32) orelse return -1;
-    offset.* = getu32(font, @intCast(c.uint_fast32_t, @ptrToInt(match) - @ptrToInt(font.mem.ptr) + 8));
-    return 0;
+        return error.InvalidTtfNoTables;
+    const match = bsearch(tag, font.mem.ptr + 12, numTables, 16, cmpu32) orelse return null;
+    return getu32(font, @ptrToInt(match) - @ptrToInt(font.mem.ptr) + 8);
 }
 
 fn cmap_fmt4(font: *Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !c.SFT_Glyph {
@@ -547,8 +542,7 @@ fn cmap_fmt12_13(font: *Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, whi
 
 // Maps Unicode code points to glyph indices.
 fn glyph_id(font: *Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
-    var cmap: c.uint_fast32_t = undefined;
-    if (gettable(font, "cmap", &cmap) < 0)
+    const cmap = (try gettable(font, "cmap")) orelse
         return error.InvalidTtfNoCmapTable;
 
     if (!is_safe_offset(font, cmap, 4))
@@ -610,8 +604,7 @@ const HorMetrics = struct {
     left_side_bearing: i16,
 };
 fn hor_metrics(font: *Font, glyph: c.SFT_Glyph) !HorMetrics {
-    var hmtx: c.uint_fast32_t = undefined;
-    if (gettable(font, "hmtx", &hmtx) < 0)
+    const hmtx = (try gettable(font, "hmtx")) orelse
         return error.InvalidTtfNoHmtxTable;
 
     if (glyph < font.numLongHmtx) {
@@ -668,12 +661,9 @@ fn glyph_bbox(sft: *c.SFT, outline: c.uint_fast32_t) ![4]c_int {
 
 // Returns the offset into the font that the glyph's outline is stored at.
 fn outline_offset(font: *Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
-    var loca: c.uint_fast32_t = undefined;
-    if (gettable(font, "loca", &loca) < 0)
+    const loca = (try gettable(font, "loca")) orelse
 	return error.InvalidTtfNoLocaTable;
-
-    var glyf: c.uint_fast32_t = undefined;
-    if (gettable(font, "glyf", &glyf) < 0)
+    const glyf = (try gettable(font, "glyf")) orelse
 	return error.InvalidttfNoGlyfTable;
 
     const entry = blk: {
