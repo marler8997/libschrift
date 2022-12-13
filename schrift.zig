@@ -5,7 +5,6 @@ const c = @cImport({
     @cInclude("stdlib.h");
     @cInclude("math.h");
     @cInclude("schrift.h");
-    @cInclude("private.h");
 });
 
 const Font = struct {
@@ -26,6 +25,32 @@ const Font = struct {
     pub fn toC(self: *Font) *c.SFT_Font {
         return @ptrCast(*c.SFT_Font, self);
     }
+};
+
+const Point = struct { x: f64, y: f64 };
+const Line = struct {
+    beg: c.uint_least16_t,
+    end: c.uint_least16_t,
+};
+const Curve = struct {
+    beg: c.uint_least16_t,
+    end: c.uint_least16_t,
+    ctrl: c.uint_least16_t,
+};
+
+fn Al(comptime T: type) type {
+    return struct {
+        items: struct {
+            ptr: [*]T = &[_]T{ },
+            len: c.uint_least16_t = 0,
+        } = .{},
+        capacity: c.uint_least16_t = 0,
+    };
+}
+const Outline = struct {
+    points: Al(Point) = .{},
+    curves: Al(Curve) = .{},
+    lines: Al(Line) = .{},
 };
 
 const Cell = struct {
@@ -173,7 +198,7 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
 	transform[5] = sft.yOffset - @intToFloat(f64, bbox[1]);
     }
 
-    var outl = std.mem.zeroes(c.Outline);
+    var outl = Outline{};
     defer free_outline(&outl);
     init_outline(&outl) catch return -1;
 
@@ -277,7 +302,7 @@ fn init_font(font: *Font) !void {
     font.numLongHmtx = getu16(font, hhea + 34);
 }
 
-fn midpoint(a: c.Point, b: c.Point) c.Point {
+fn midpoint(a: Point, b: Point) Point {
     return .{
 	.x = 0.5 * (a.x + b.x),
 	.y = 0.5 * (a.y + b.y),
@@ -285,7 +310,7 @@ fn midpoint(a: c.Point, b: c.Point) c.Point {
 }
 
 // Applies an affine linear transformation matrix to a set of points.
-fn transform_points(points: []c.Point, trf: *const [6]f64) void {
+fn transform_points(points: []Point, trf: *const [6]f64) void {
     for (points) |*pt_ref| {
         const pt = pt_ref.*;
         pt_ref.* = .{
@@ -295,7 +320,7 @@ fn transform_points(points: []c.Point, trf: *const [6]f64) void {
     }
 }
 
-fn clip_points(points: []c.Point, width: f64, height: f64) void {
+fn clip_points(points: []Point, width: f64, height: f64) void {
     for (points) |*pt| {
 	if (pt.x < 0.0) {
             pt.x = 0.0;
@@ -315,47 +340,47 @@ fn malloc(comptime T: type, count: usize) error{OutOfMemory}![*]T {
     return @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
 }
 
-fn init_outline(outl: *c.Outline) error{OutOfMemory}!void {
+fn init_outline(outl: *Outline) error{OutOfMemory}!void {
     // TODO Smaller initial allocations
-    outl.numPoints = 0;
-    outl.capPoints = 64;
-    outl.points = try malloc(c.Point, outl.capPoints);
-    outl.numCurves = 0;
-    outl.capCurves = 64;
-    outl.curves = try malloc(c.Curve, outl.capCurves);
-    outl.numLines = 0;
-    outl.capLines = 64;
-    outl.lines = try malloc(c.Line, outl.capLines);
+    outl.points.items.len = 0;
+    outl.points.capacity = 64;
+    outl.points.items.ptr = try malloc(Point, outl.points.capacity);
+    outl.curves.items.len = 0;
+    outl.curves.capacity = 64;
+    outl.curves.items.ptr = try malloc(Curve, outl.curves.capacity);
+    outl.lines.items.len = 0;
+    outl.lines.capacity = 64;
+    outl.lines.items.ptr = try malloc(Line, outl.lines.capacity);
 }
 
-fn free_outline(outl: *c.Outline) void {
-    c.free(outl.points);
-    c.free(outl.curves);
-    c.free(outl.lines);
+fn free_outline(outl: *Outline) void {
+    if (outl.points.capacity != 0) c.free(outl.points.items.ptr);
+    if (outl.curves.capacity != 0) c.free(outl.curves.items.ptr);
+    if (outl.lines.capacity != 0) c.free(outl.lines.items.ptr);
 }
 
-fn grow(comptime T: type, cap_ref: *c.uint_least16_t, ptr_ref: *[*c]T) error{OutOfMemory,TooManyPrimitives}!void {
+fn grow(comptime T: type, cap_ref: *c.uint_least16_t, ptr_ref: *[*]T) error{OutOfMemory,TooManyPrimitives}!void {
     std.debug.assert(cap_ref.* > 0);
     if (cap_ref.* > std.math.maxInt(u16) / 2)
 	return error.TooManyPrimitives;
     const next_cap = cap_ref.* * 2;
     const ptr = c.realloc(ptr_ref.*, next_cap * @sizeOf(T)) orelse return error.OutOfMemory;
     cap_ref.* = next_cap;
-    ptr_ref.* = @ptrCast([*c]T, @alignCast(@alignOf(T), ptr));
+    ptr_ref.* = @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
 }
 
-fn grow_points(outline: *c.Outline) c_int {
-    grow(c.Point, &outline.capPoints, &outline.points) catch return -1;
+fn grow_points(outline: *Outline) c_int {
+    grow(Point, &outline.points.capacity, &outline.points.items.ptr) catch return -1;
     return 0;
 }
 
-fn grow_curves(outline: *c.Outline) c_int {
-    grow(c.Curve, &outline.capCurves, &outline.curves) catch return -1;
+fn grow_curves(outline: *Outline) c_int {
+    grow(Curve, &outline.curves.capacity, &outline.curves.items.ptr) catch return -1;
     return 0;
 }
 
-fn grow_lines(outline: *c.Outline) c_int {
-    grow(c.Line, &outline.capLines, &outline.lines) catch return -1;
+fn grow_lines(outline: *Outline) c_int {
+    grow(Line, &outline.lines.capacity, &outline.lines.items.ptr) catch return -1;
     return 0;
 }
 
@@ -695,7 +720,7 @@ fn simple_points(
     offset: c.uint_fast32_t,
     numPts: c.uint_fast16_t,
     flags: [*]u8,
-    points: [*]c.Point,
+    points: [*]Point,
 ) !void {
     var off = offset;
     const Accum = i32;
@@ -746,7 +771,7 @@ fn decode_contour(
     flags_start: [*]u8,
     basePointStart: c.uint_fast16_t,
     count_start: c.uint_fast16_t,
-    outl: *c.Outline,
+    outl: *Outline,
 ) !void {
     // Skip contours with less than two points, since the following algorithm can't handle them and
     // they should appear invisible either way (because they don't have any area).
@@ -769,14 +794,14 @@ fn decode_contour(
 	    break :blk @intCast(c.uint_least16_t, basePoint + count);
         }
 
-	if (outl.numPoints >= outl.capPoints and grow_points(outl) < 0)
+	if (outl.points.items.len >= outl.points.capacity and grow_points(outl) < 0)
 	    return error.InvalidTtfBadOutline;
 
-	outl.points[outl.numPoints] = midpoint(
-	    outl.points[basePoint],
-	    outl.points[basePoint + count - 1]);
-        const looseEnd = outl.numPoints;
-        outl.numPoints += 1;
+	outl.points.items.ptr[outl.points.items.len] = midpoint(
+	    outl.points.items.ptr[basePoint],
+	    outl.points.items.ptr[basePoint + count - 1]);
+        const looseEnd = outl.points.items.len;
+        outl.points.items.len += 1;
         break :blk looseEnd;
     };
     var beg = looseEnd;
@@ -787,30 +812,30 @@ fn decode_contour(
 	const cur = @intCast(c.uint_least16_t, basePoint + i);
 	if (0 != (flags[i] & ttf.point_is_on_curve)) {
 	    if (opt_ctrl) |ctrl| {
-		if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
+		if (outl.curves.items.len >= outl.curves.capacity and grow_curves(outl) < 0)
 	            return error.InvalidTtfBadOutline;
-		outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = cur, .ctrl = ctrl };
-                outl.numCurves += 1;
+		outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = cur, .ctrl = ctrl };
+                outl.curves.items.len += 1;
 	    } else {
-		if (outl.numLines >= outl.capLines and grow_lines(outl) < 0)
+		if (outl.lines.items.len >= outl.lines.capacity and grow_lines(outl) < 0)
 	            return error.InvalidTtfBadOutline;
-		outl.lines[outl.numLines] = c.Line{ .beg = beg, .end = cur };
-                outl.numLines += 1;
+		outl.lines.items.ptr[outl.lines.items.len] = Line{ .beg = beg, .end = cur };
+                outl.lines.items.len += 1;
 	    }
 	    beg = cur;
             opt_ctrl = null;
 	} else {
 	    if (opt_ctrl) |ctrl| {
-		const center: c.uint_least16_t = outl.numPoints;
-		if (outl.numPoints >= outl.capPoints and grow_points(outl) < 0)
+		const center: c.uint_least16_t = outl.points.items.len;
+		if (outl.points.items.len >= outl.points.capacity and grow_points(outl) < 0)
 	            return error.InvalidTtfBadOutline;
-		outl.points[center] = midpoint(outl.points[ctrl], outl.points[cur]);
-                outl.numPoints += 1;
+		outl.points.items.ptr[center] = midpoint(outl.points.items.ptr[ctrl], outl.points.items.ptr[cur]);
+                outl.points.items.len += 1;
 
-		if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
+		if (outl.curves.items.len >= outl.curves.capacity and grow_curves(outl) < 0)
 	            return error.InvalidTtfBadOutline;
-		outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = center, .ctrl = ctrl };
-                outl.numCurves += 1;
+		outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = center, .ctrl = ctrl };
+                outl.curves.items.len += 1;
 
 		beg = center;
 	    }
@@ -818,15 +843,15 @@ fn decode_contour(
 	}
     }
     if (opt_ctrl) |ctrl| {
-	if (outl.numCurves >= outl.capCurves and grow_curves(outl) < 0)
+	if (outl.curves.items.len >= outl.curves.capacity and grow_curves(outl) < 0)
 	    return error.InvalidTtfBadOutline;
-	outl.curves[outl.numCurves] = c.Curve{ .beg = beg, .end = looseEnd, .ctrl = ctrl };
-        outl.numCurves += 1;
+	outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = looseEnd, .ctrl = ctrl };
+        outl.curves.items.len += 1;
     } else {
-	if (outl.numLines >= outl.capLines and grow_lines(outl) < 0)
+	if (outl.lines.items.len >= outl.lines.capacity and grow_lines(outl) < 0)
 	    return error.InvalidTtfBadOutline;
-	outl.lines[outl.numLines] = c.Line{ .beg = beg, .end = looseEnd };
-        outl.numLines += 1;
+	outl.lines.items.ptr[outl.lines.items.len] = Line{ .beg = beg, .end = looseEnd };
+        outl.lines.items.len += 1;
     }
 }
 
@@ -852,10 +877,10 @@ fn simple_outline(
     font: *Font,
     offset_start: c.uint_fast32_t,
     numContours: u15,
-    outl: *c.Outline,
+    outl: *Outline,
 ) !void {
     std.debug.assert(numContours > 0);
-    const basePoint: c.uint_fast16_t = outl.numPoints;
+    const basePoint: c.uint_fast16_t = outl.points.items.len;
 
     if (!is_safe_offset(font, offset_start, numContours * 2 + 2))
 	return error.InvalidTtfBadOutline;
@@ -863,11 +888,11 @@ fn simple_outline(
     if (numPts >= std.math.maxInt(u16))
 	return error.InvalidTtfBadOutline;
     numPts += 1;
-    if (outl.numPoints > std.math.maxInt(u16) - numPts)
+    if (outl.points.items.len > std.math.maxInt(u16) - numPts)
 	return error.InvalidTtfBadOutline;
 
     // TODO: this should be a single realloc
-    while (outl.capPoints < basePoint + numPts) {
+    while (outl.points.capacity < basePoint + numPts) {
 	if (grow_points(outl) < 0)
 	    return error.InvalidTtfBadOutline;
     }
@@ -908,8 +933,8 @@ fn simple_outline(
     offset += 2 + @as(u32, getu16(font, offset));
 
     offset = try simple_flags(font, offset, numPts, flags);
-    try simple_points(font, offset, numPts, flags, outl.points + basePoint);
-    outl.numPoints = @intCast(c.uint_least16_t, outl.numPoints + numPts);
+    try simple_points(font, offset, numPts, flags, outl.points.items.ptr + basePoint);
+    outl.points.items.len = @intCast(c.uint_least16_t, outl.points.items.len + numPts);
 
     var beg: c.uint_fast16_t = 0;
     {
@@ -926,7 +951,7 @@ fn compound_outline(
     font: *Font,
     offset_start: c.uint_fast32_t,
     recDepth: u8,
-    outl: *c.Outline,
+    outl: *Outline,
 ) !void {
     // Guard against infinite recursion (compound glyphs that have themselves as component).
     if (recDepth >= 4)
@@ -986,16 +1011,16 @@ fn compound_outline(
 	// It's almost as if nobody ever uses this feature anyway.
         const outline = try outline_offset(font, glyph);
 	if (outline != 0) {
-	    const basePoint = outl.numPoints;
+	    const basePoint = outl.points.items.len;
 	    try decode_outline(font, outline, recDepth + 1, outl);
-	    transform_points(outl.points[basePoint .. outl.numPoints], &local);
+	    transform_points(outl.points.items.ptr[basePoint .. outl.points.items.len], &local);
 	}
 
         if (0 == (flags & ttf.there_are_more_components)) break;
     }
 }
 
-fn decode_outline(font: *Font, offset: c.uint_fast32_t, recDepth: u8, outl: *c.Outline) !void {
+fn decode_outline(font: *Font, offset: c.uint_fast32_t, recDepth: u8, outl: *Outline) !void {
     if (!is_safe_offset(font, offset, 10))
 	return error.InvalidTtfBadOutline;
     const numContours = geti16(font, offset);
@@ -1009,56 +1034,56 @@ fn decode_outline(font: *Font, offset: c.uint_fast32_t, recDepth: u8, outl: *c.O
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
-fn is_flat(outline: *c.Outline, curve: c.Curve) c_int {
+fn is_flat(outline: *Outline, curve: Curve) c_int {
     const maxArea2: f64 = 2.0;
-    const a = outline.points[curve.beg];
-    const b = outline.points[curve.ctrl];
-    const cpoint = outline.points[curve.end];
-    const g = c.Point{ .x = b.x-a.x, .y = b.y-a.y };
-    const h = c.Point{ .x = cpoint.x-a.x, .y = cpoint.y-a.y };
+    const a = outline.points.items.ptr[curve.beg];
+    const b = outline.points.items.ptr[curve.ctrl];
+    const cpoint = outline.points.items.ptr[curve.end];
+    const g = Point{ .x = b.x-a.x, .y = b.y-a.y };
+    const h = Point{ .x = cpoint.x-a.x, .y = cpoint.y-a.y };
     const area2 = std.math.fabs(g.x*h.y-h.x*g.y);
     return if (area2 <= maxArea2) 1 else 0;
 }
-fn is_flat_zig(outline: *c.Outline, curve: c.Curve) bool {
+fn is_flat_zig(outline: *Outline, curve: Curve) bool {
     return is_flat(outline, curve) != 0;
 }
 
-fn tesselate_curve(curve_in: c.Curve, outline: *c.Outline) c_int {
+fn tesselate_curve(curve_in: Curve, outline: *Outline) c_int {
     // From my tests I can conclude that this stack barely reaches a top height
     // of 4 elements even for the largest font sizes I'm willing to support. And
     // as space requirements should only grow logarithmically, I think 10 is
     // more than enough.
     const STACK_SIZE = 10;
-    var stack: [STACK_SIZE]c.Curve = undefined;
+    var stack: [STACK_SIZE]Curve = undefined;
     var top: usize = 0;
     var curve = curve_in;
     while (true) {
 	if (is_flat_zig(outline, curve) or top >= STACK_SIZE) {
-	    if (outline.numLines >= outline.capLines and grow_lines(outline) < 0)
+	    if (outline.lines.items.len >= outline.lines.capacity and grow_lines(outline) < 0)
 		return -1;
-	    outline.lines[outline.numLines] = .{ .beg = curve.beg, .end = curve.end };
-            outline.numLines += 1;
+	    outline.lines.items.ptr[outline.lines.items.len] = .{ .beg = curve.beg, .end = curve.end };
+            outline.lines.items.len += 1;
 	    if (top == 0) break;
             top -= 1;
 	    curve = stack[top];
 	} else {
-	    const ctrl0 = outline.numPoints;
-	    if (outline.numPoints >= outline.capPoints and grow_points(outline) < 0)
+	    const ctrl0 = outline.points.items.len;
+	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
 		return -1;
-	    outline.points[ctrl0] = midpoint(outline.points[curve.beg], outline.points[curve.ctrl]);
-            outline.numPoints += 1;
+	    outline.points.items.ptr[ctrl0] = midpoint(outline.points.items.ptr[curve.beg], outline.points.items.ptr[curve.ctrl]);
+            outline.points.items.len += 1;
 
-	    const ctrl1 = outline.numPoints;
-	    if (outline.numPoints >= outline.capPoints and grow_points(outline) < 0)
+	    const ctrl1 = outline.points.items.len;
+	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
 		return -1;
-	    outline.points[ctrl1] = midpoint(outline.points[curve.ctrl], outline.points[curve.end]);
-            outline.numPoints += 1;
+	    outline.points.items.ptr[ctrl1] = midpoint(outline.points.items.ptr[curve.ctrl], outline.points.items.ptr[curve.end]);
+            outline.points.items.len += 1;
 
-	    const pivot = outline.numPoints;
-	    if (outline.numPoints >= outline.capPoints and grow_points(outline) < 0)
+	    const pivot = outline.points.items.len;
+	    if (outline.points.items.len >= outline.points.capacity and grow_points(outline) < 0)
 		return -1;
-	    outline.points[pivot] = midpoint(outline.points[ctrl0], outline.points[ctrl1]);
-            outline.numPoints += 1;
+	    outline.points.items.ptr[pivot] = midpoint(outline.points.items.ptr[ctrl0], outline.points.items.ptr[ctrl1]);
+            outline.points.items.len += 1;
 
 	    stack[top] = .{ .beg = curve.beg, .end = pivot, .ctrl = ctrl0 };
             top += 1;
@@ -1068,10 +1093,10 @@ fn tesselate_curve(curve_in: c.Curve, outline: *c.Outline) c_int {
     return 0;
 }
 
-fn tesselate_curves(outline: *c.Outline) c_int {
+fn tesselate_curves(outline: *Outline) c_int {
     var i: usize = 0;
-    while (i < outline.numCurves) : (i += 1) {
-        if (tesselate_curve(outline.curves[i], outline) < 0)
+    while (i < outline.curves.items.len) : (i += 1) {
+        if (tesselate_curve(outline.curves.items.ptr[i], outline) < 0)
             return -1;
     }
     return 0;
@@ -1090,8 +1115,8 @@ fn fast_ceil(x: f64) c_int {
 }
 
 // Draws a line into the buffer. Uses a custom 2D raycasting algorithm to do so.
-fn draw_line(buf: Raster, origin: c.Point, goal: c.Point) void {
-    const delta = c.Point{
+fn draw_line(buf: Raster, origin: Point, goal: Point) void {
+    const delta = Point{
         .x = goal.x - origin.x,
         .y = goal.y - origin.y,
     };
@@ -1103,14 +1128,14 @@ fn draw_line(buf: Raster, origin: c.Point, goal: c.Point) void {
     if (dir.y == 0) {
 	return;
     }
-    const crossingIncr = c.Point{
+    const crossingIncr = Point{
         .x = if (dir.x != 0) std.math.fabs(1.0 / delta.x) else 1.0,
         .y = std.math.fabs(1.0 / delta.y),
     };
 
     var pixel: struct { x: i32, y: i32 } = undefined;
     //struct { int x, y; } pixel;
-    var nextCrossing: c.Point = undefined;
+    var nextCrossing: Point = undefined;
     var numSteps: c_int = 0;
     if (dir.x == 0) {
 	pixel.x = fast_floor(origin.x);
@@ -1171,12 +1196,12 @@ fn draw_line(buf: Raster, origin: c.Point, goal: c.Point) void {
     cptr.* = cell;
 }
 
-fn draw_lines(outline: *c.Outline, buf: Raster) void {
+fn draw_lines(outline: *Outline, buf: Raster) void {
     var i: usize = 0;
-    while (i < outline.numLines) : (i += 1) {
-        const line = outline.lines[i];
-        const origin = outline.points[line.beg];
-        const goal = outline.points[line.end];
+    while (i < outline.lines.items.len) : (i += 1) {
+        const line = outline.lines.items.ptr[i];
+        const origin = outline.points.items.ptr[line.beg];
+        const goal = outline.points.items.ptr[line.end];
         draw_line(buf, origin, goal);
     }
 }
@@ -1196,9 +1221,9 @@ fn post_process(buf: Raster, image: [*]u8) void {
     }
 }
 
-fn render_outline(outl: *c.Outline, transform: *const [6]f64, image: c.SFT_Image) !void {
-    transform_points(outl.points[0 .. outl.numPoints], transform);
-    clip_points(outl.points[0 .. outl.numPoints], @intToFloat(f64, image.width), @intToFloat(f64, image.height));
+fn render_outline(outl: *Outline, transform: *const [6]f64, image: c.SFT_Image) !void {
+    transform_points(outl.points.items.ptr[0 .. outl.points.items.len], transform);
+    clip_points(outl.points.items.ptr[0 .. outl.points.items.len], @intToFloat(f64, image.width), @intToFloat(f64, image.height));
 
     if (tesselate_curves(outl) < 0)
 	return error.SomethingFailed; // TODO: propagate correct error

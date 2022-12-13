@@ -10,7 +10,7 @@ VERSION=0.10.2
 
 all: libschrift.a demo stress
 
-libschrift.a: schrift.h private.h schrift.zig
+libschrift.a: schrift.h schrift.zig
 	zig build-lib -OReleaseFast -static -I. schrift.zig -lc
 
 demo: libschrift.a
