@@ -7,21 +7,25 @@ const c = @cImport({
 });
 
 const Font = struct {
-    mem: []u8,
+    mem: []const u8,
     mapping: if (builtin.os.tag == .windows) ?std.os.windows.HANDLE else void,
     source: enum {
         mapped_file,
         user_supplied_memory,
     },
-    unitsPerEm: c.uint_least16_t,
-    locaFormat: c.int_least16_t,
-    numLongHmtx: c.uint_least16_t,
+    info: TtfInfo,
     pub fn fromC(ptr: *c.SFT_Font) *Font {
         return @ptrCast(*Font, @alignCast(@alignOf(Font), ptr));
     }
     pub fn toC(self: *Font) *c.SFT_Font {
         return @ptrCast(*c.SFT_Font, self);
     }
+};
+
+const TtfInfo = struct {
+    unitsPerEm: c.uint_least16_t,
+    locaFormat: c.int_least16_t,
+    numLongHmtx: c.uint_least16_t,
 };
 
 const Point = struct { x: f64, y: f64 };
@@ -88,7 +92,7 @@ export fn sft_loadmem(mem: [*]u8, size: usize) ?*c.SFT_Font {
     const font = allocFont() catch return null;
     font.mem = mem[0 .. size];
     font.source = .user_supplied_memory;
-    init_font(font) catch {
+    font.info = getTtfInfo(font.mem) catch {
         c.sft_freefont(font.toC());
         return null;
     };
@@ -103,7 +107,7 @@ export fn sft_loadfile(filename: [*:0]const u8) ?*c.SFT_Font {
 	c.free(font);
 	return null;
     };
-    init_font(font) catch {
+    font.info = getTtfInfo(font.mem) catch {
 	sft_freefont(font.toC());
 	return null;
     };
@@ -124,7 +128,7 @@ export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
     const hhea = (gettable(font, "hhea") catch return -1) orelse return -1;
     if (!is_safe_offset(font, hhea, 36))
 	return -1;
-    const factor = sft.yScale / @intToFloat(f64, font.*.unitsPerEm);
+    const factor = sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
     metrics.ascender  = @intToFloat(f64, geti16(font, hhea + 4)) * factor;
     metrics.descender = @intToFloat(f64, geti16(font, hhea + 6)) * factor;
     metrics.lineGap   = @intToFloat(f64, geti16(font, hhea + 8)) * factor;
@@ -147,7 +151,7 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
 
     const font = Font.fromC(sft.font orelse unreachable);
     const hor = hor_metrics(font, glyph) catch return -1;
-    const xScale = sft.xScale / @intToFloat(f64, font.*.unitsPerEm);
+    const xScale = sft.xScale / @intToFloat(f64, font.info.unitsPerEm);
     metrics.advanceWidth    = @intToFloat(f64, hor.advance_width) * xScale;
     metrics.leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScale + sft.xOffset;
 
@@ -171,15 +175,15 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
     // the transformed bounding boxes min corner lines
     // up with the (0, 0) point.
     var transform: [6]f64 = undefined;
-    transform[0] = sft.xScale / @intToFloat(f64, font.*.unitsPerEm);
+    transform[0] = sft.xScale / @intToFloat(f64, font.info.unitsPerEm);
     transform[1] = 0.0;
     transform[2] = 0.0;
     transform[4] = sft.xOffset - @intToFloat(f64, bbox[0]);
     if ((sft.flags & c.SFT_DOWNWARD_Y) != 0) {
-	transform[3] = -sft.yScale / @intToFloat(f64, font.*.unitsPerEm);
+	transform[3] = -sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
 	transform[5] = @intToFloat(f64, bbox[3]) - sft.yOffset;
     } else {
-	transform[3] = sft.yScale / @intToFloat(f64, font.*.unitsPerEm);
+	transform[3] = sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
 	transform[5] = sft.yOffset - @intToFloat(f64, bbox[1]);
     }
 
@@ -261,26 +265,29 @@ fn unmap_file(font: *Font) void {
     }
 }
 
-fn init_font(font: *Font) !void {
-    if (!is_safe_offset(font, 0, 12))
-        return error.InvalidTtfTooSmall;
+fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
+    if (ttf_mem.len < 12) return error.InvalidTtfTooSmall;
 
     // Check for a compatible scalerType (magic number).
-    const scalerType = getu32(font, 0);
+    const scalerType = std.mem.readIntBig(u32, ttf_mem[0..4]);
     if (scalerType != ttf.file_magic_one and scalerType != ttf.file_magic_two)
 	return error.InvalidTtfBadMagic;
-
-    const head = (try gettable(font, "head")) orelse
+    const head = (try gettable2(ttf_mem, "head")) orelse
 	return error.InvalidTtfNoHeadTable;
-    if (!is_safe_offset(font, head, 54))
+    const head_limit = head + 52;
+    if (head_limit > ttf_mem.len)
         return error.InvalidTtfBadHeadTable;
-    font.unitsPerEm = getu16(font, head + 18);
-    font.locaFormat = geti16(font, head + 50);
-    const hhea = (try gettable(font, "hhea")) orelse
-        return error.InvalidTtfNoHheaTable;
-    if (!is_safe_offset(font, hhea, 36))
+    //const unitsPerEm = std.mem.readIntBig(u16, ttf_mem[head + 18..][0..2]);
+    const hhea = (try gettable2(ttf_mem, "hhea")) orelse
+	return error.InvalidTtfNoHheaTable;
+    const hhea_limit = hhea + 36;
+    if (hhea_limit > ttf_mem.len)
         return error.InvalidTtfBadHheaTable;
-    font.numLongHmtx = getu16(font, hhea + 34);
+    return TtfInfo{
+        .unitsPerEm = std.mem.readIntBig(u16, ttf_mem[head + 18..][0..2]),
+        .locaFormat = std.mem.readIntBig(i16, ttf_mem[head + 50..][0..2]),
+        .numLongHmtx = std.mem.readIntBig(u16, ttf_mem[hhea + 34..][0..2]),
+    };
 }
 
 fn midpoint(a: Point, b: Point) Point {
@@ -462,12 +469,17 @@ fn getu32(font: *Font, offset: usize) u32 {
 }
 
 fn gettable(font: *Font, tag: *const [4]u8) !?c.uint_fast32_t {
+    return gettable2(font.mem, tag);
+}
+fn gettable2(ttf_mem: []const u8, tag: *const [4]u8) !?c.uint_fast32_t {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
-    const numTables = getu16(font, 4);
-    if (!is_safe_offset(font, 12, numTables * 16))
-        return error.InvalidTtfNoTables;
-    const match = bsearch(tag, font.mem.ptr + 12, numTables, 16, cmpu32) orelse return null;
-    return getu32(font, @ptrToInt(match) - @ptrToInt(font.mem.ptr) + 8);
+    const numTables = std.mem.readIntBig(u16, ttf_mem[4..6]);
+    const limit = 12 + @intCast(usize, numTables) * 16;
+    if (limit > ttf_mem.len)
+        return error.InvalidTtfBadTables;
+    const match_ptr = bsearch(tag, ttf_mem.ptr + 12, numTables, 16, cmpu32) orelse return null;
+    const match_offset = @ptrToInt(match_ptr) - @ptrToInt(ttf_mem.ptr);
+    return std.mem.readIntBig(u32, ttf_mem[match_offset + 8..][0 .. 4]);
 }
 
 fn cmap_fmt4(font: *Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !c.SFT_Glyph {
@@ -607,7 +619,7 @@ fn hor_metrics(font: *Font, glyph: c.SFT_Glyph) !HorMetrics {
     const hmtx = (try gettable(font, "hmtx")) orelse
         return error.InvalidTtfNoHmtxTable;
 
-    if (glyph < font.numLongHmtx) {
+    if (glyph < font.info.numLongHmtx) {
 	// glyph is inside long metrics segment.
 	const offset = hmtx + 4 * glyph;
 	if (!is_safe_offset(font, offset, 4))
@@ -619,14 +631,14 @@ fn hor_metrics(font: *Font, glyph: c.SFT_Glyph) !HorMetrics {
     }
 
     // glyph is inside short metrics segment.
-    const boundary = hmtx + 4 * @intCast(c.uint_fast32_t, font.numLongHmtx);
+    const boundary = hmtx + 4 * @intCast(c.uint_fast32_t, font.info.numLongHmtx);
     if (boundary < 4)
         return error.InvalidTtfBadHmtxTable;
 
     const width_offset = boundary - 4;
     if (!is_safe_offset(font, width_offset, 4))
         return error.InvalidTtfBadHmtxTable;
-    const bearing_offset = boundary + 2 * (glyph - font.numLongHmtx);
+    const bearing_offset = boundary + 2 * (glyph - font.info.numLongHmtx);
     if (!is_safe_offset(font, bearing_offset, 2))
         return error.InvalidTtfBadHmtxTable;
 
@@ -649,8 +661,8 @@ fn glyph_bbox(sft: *c.SFT, outline: c.uint_fast32_t) ![4]c_int {
     if (box[2] <= box[0] or box[3] <= box[1])
 	return error.InvalidTtfBadBbox;
     // Transform the bounding box into SFT coordinate space.
-    const xScale = sft.xScale / @intToFloat(f64, font.*.unitsPerEm);
-    const yScale = sft.yScale / @intToFloat(f64, font.*.unitsPerEm);
+    const xScale = sft.xScale / @intToFloat(f64, font.info.unitsPerEm);
+    const yScale = sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
     return [_]c_int {
         @floatToInt(c_int, @floor(@intToFloat(f64, box[0]) * xScale + sft.xOffset)),
         @floatToInt(c_int, @floor(@intToFloat(f64, box[1]) * yScale + sft.yOffset)),
@@ -667,7 +679,7 @@ fn outline_offset(font: *Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
 	return error.InvalidttfNoGlyfTable;
 
     const entry = blk: {
-        if (font.locaFormat == 0) {
+        if (font.info.locaFormat == 0) {
 	    const base = loca + 2 * glyph;
 	    if (!is_safe_offset(font, base, 4))
 	        return error.InvalidTtfBadLocaTable;
