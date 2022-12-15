@@ -166,27 +166,82 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
     @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
 
     const font = Font.fromC(sft.font orelse unreachable);
-    const hor = hor_metrics(font, glyph) catch return -1;
-    const xScale = sft.xScale / @intToFloat(f64, font.info.unitsPerEm);
-    metrics.advanceWidth    = @intToFloat(f64, hor.advance_width) * xScale;
-    metrics.leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScale + sft.xOffset;
-
-    const outline = outline_offset(font, glyph) catch return -1;
-    if (outline == 0)
-	return 0;
-    const bbox = glyph_bbox(sft, outline) catch return -1;
-    metrics.minWidth  = bbox[2] - bbox[0] + 1;
-    metrics.minHeight = bbox[3] - bbox[1] + 1;
-    metrics.yOffset   = if ((sft.flags & c.SFT_DOWNWARD_Y) != 0) -bbox[3] else bbox[1];
+    const m = gmetrics(
+        font.mem,
+        font.info,
+        (sft.flags & c.SFT_DOWNWARD_Y) != 0,
+        .{ .x = sft.xScale, .y = sft.yScale },
+        .{ .x = sft.xOffset, .y = sft.yOffset },
+        @intCast(u32, glyph),
+    ) catch return -1;
+    metrics.* = .{
+        .advanceWidth = m.advanceWidth,
+        .leftSideBearing = m.leftSideBearing,
+        .yOffset = @intCast(c_int, m.yOffset),
+        .minWidth = @intCast(c_int, m.minWidth),
+        .minHeight = @intCast(c_int, m.minHeight),
+    };
     return 0;
+}
+
+pub fn XY(comptime T: type) type {
+    return struct {
+        x: T,
+        y: T,
+    };
+}
+pub const GMetrics = struct {
+    advanceWidth: f64,
+    leftSideBearing: f64,
+    yOffset: i32,
+    minWidth: i32,
+    minHeight: i32,
+};
+pub fn gmetrics(
+    ttf_mem: []const u8,
+    info: TtfInfo,
+    downward: bool,
+    scale: XY(f64),
+    offset: XY(f64),
+    glyph: u32,
+) !GMetrics {
+    const hor = try hor_metrics(ttf_mem, info, glyph);
+    const xScaleEm = scale.x / @intToFloat(f64, info.unitsPerEm);
+
+    const advanceWidth    = @intToFloat(f64, hor.advance_width) * xScaleEm;
+    const leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScaleEm + offset.x;
+
+    const outline = (try outline_offset(ttf_mem, info, glyph)) orelse return GMetrics{
+        .advanceWidth = advanceWidth,
+        .leftSideBearing = leftSideBearing,
+        .minWidth = 0,
+        .minHeight = 0,
+        .yOffset = 0,
+    };
+    const bbox = try glyph_bbox(ttf_mem, info, scale, offset, outline);
+    //std.debug.assert(bbox.x_min < bbox.x_max);
+    //std.debug.assert(bbox.y_min < bbox.y_max);
+    const y_min = @floatToInt(i32, bbox.y_min);
+    const y_max = @floatToInt(i32, bbox.y_max);
+    return GMetrics{
+        .advanceWidth = advanceWidth,
+        .leftSideBearing = leftSideBearing,
+        .minWidth  = @floatToInt(i32, bbox.x_max) - @floatToInt(i32, bbox.x_min) + 1,
+        .minHeight = y_max - y_min + 1,
+        .yOffset   = if (downward) -y_max else y_min,
+    };
 }
 
 export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
     const font = Font.fromC(sft.font orelse unreachable);
-    const outline = outline_offset(font, glyph) catch return -1;
-    if (outline == 0)
-	return 0;
-    const bbox = glyph_bbox(sft, outline) catch return -1;
+    const outline = (outline_offset(font.mem, font.info, glyph) catch return -1) orelse return 0;
+    const bbox = glyph_bbox(
+        font.mem,
+        font.info,
+        .{ .x = sft.xScale, .y = sft.yScale },
+        .{ .x = sft.xOffset, .y = sft.yOffset },
+        outline,
+    ) catch return -1;
     // Set up the transformation matrix such that
     // the transformed bounding boxes min corner lines
     // up with the (0, 0) point.
@@ -194,13 +249,13 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
     transform[0] = sft.xScale / @intToFloat(f64, font.info.unitsPerEm);
     transform[1] = 0.0;
     transform[2] = 0.0;
-    transform[4] = sft.xOffset - @intToFloat(f64, bbox[0]);
+    transform[4] = sft.xOffset - bbox.x_min;
     if ((sft.flags & c.SFT_DOWNWARD_Y) != 0) {
 	transform[3] = -sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
-	transform[5] = @intToFloat(f64, bbox[3]) - sft.yOffset;
+	transform[5] = bbox.y_max - sft.yOffset;
     } else {
 	transform[3] = sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
-	transform[5] = sft.yOffset - @intToFloat(f64, bbox[1]);
+	transform[5] = sft.yOffset - bbox.y_min;
     }
 
     var outl = Outline{};
@@ -634,89 +689,92 @@ const HorMetrics = struct {
     advance_width: u16,
     left_side_bearing: i16,
 };
-fn hor_metrics(font: *Font, glyph: c.SFT_Glyph) !HorMetrics {
-    const hmtx = (try gettable(font, "hmtx")) orelse
+fn hor_metrics(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !HorMetrics {
+    const hmtx = (try gettable2(ttf_mem, "hmtx")) orelse
         return error.InvalidTtfNoHmtxTable;
 
-    if (glyph < font.info.numLongHmtx) {
+    if (glyph < info.numLongHmtx) {
 	// glyph is inside long metrics segment.
 	const offset = hmtx + 4 * glyph;
-	if (!is_safe_offset(font, offset, 4))
+        if (offset + 4 > ttf_mem.len)
             return error.InvalidTtfBadHmtxTable;
         return .{
-            .advance_width = getu16(font, offset),
-            .left_side_bearing = geti16(font, offset + 2),
+            .advance_width     = readTtf(u16, ttf_mem[offset + 0..]),
+            .left_side_bearing = readTtf(i16, ttf_mem[offset + 2..]),
         };
     }
 
     // glyph is inside short metrics segment.
-    const boundary = hmtx + 4 * @intCast(c.uint_fast32_t, font.info.numLongHmtx);
+    const boundary = hmtx + 4 * @intCast(usize, info.numLongHmtx);
     if (boundary < 4)
         return error.InvalidTtfBadHmtxTable;
 
     const width_offset = boundary - 4;
-    if (!is_safe_offset(font, width_offset, 4))
+    if (width_offset + 2 > ttf_mem.len)
         return error.InvalidTtfBadHmtxTable;
-    const bearing_offset = boundary + 2 * (glyph - font.info.numLongHmtx);
-    if (!is_safe_offset(font, bearing_offset, 2))
+    const bearing_offset = boundary + 2 * @intCast(usize, glyph - info.numLongHmtx);
+    if (bearing_offset + 2 > ttf_mem.len)
         return error.InvalidTtfBadHmtxTable;
-
     return .{
-        .advance_width = getu16(font, width_offset),
-	.left_side_bearing = geti16(font, bearing_offset),
+        .advance_width     = readTtf(u16, ttf_mem[width_offset..]),
+	.left_side_bearing = readTtf(i16, ttf_mem[bearing_offset..]),
     };
 }
 
-fn glyph_bbox(sft: *c.SFT, outline: c.uint_fast32_t) ![4]c_int {
-    const font = Font.fromC(sft.font orelse unreachable);
-    if (!is_safe_offset(font, outline, 10))
+const Bbox = struct {
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+};
+fn glyph_bbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f64), outline: usize) !Bbox {
+    if (outline + 10 > ttf_mem.len)
 	return error.InvalidTtfBadOutline;
     const box = [4]i16{
-        geti16(font, outline + 2),
-        geti16(font, outline + 4),
-        geti16(font, outline + 6),
-        geti16(font, outline + 8),
+        readTtf(i16, ttf_mem[outline + 2..]),
+        readTtf(i16, ttf_mem[outline + 4..]),
+        readTtf(i16, ttf_mem[outline + 6..]),
+        readTtf(i16, ttf_mem[outline + 8..]),
     };
     if (box[2] <= box[0] or box[3] <= box[1])
 	return error.InvalidTtfBadBbox;
-    // Transform the bounding box into SFT coordinate space.
-    const xScale = sft.xScale / @intToFloat(f64, font.info.unitsPerEm);
-    const yScale = sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
-    return [_]c_int {
-        @floatToInt(c_int, @floor(@intToFloat(f64, box[0]) * xScale + sft.xOffset)),
-        @floatToInt(c_int, @floor(@intToFloat(f64, box[1]) * yScale + sft.yOffset)),
-        @floatToInt(c_int, @ceil (@intToFloat(f64, box[2]) * xScale + sft.xOffset)),
-        @floatToInt(c_int, @ceil (@intToFloat(f64, box[3]) * yScale + sft.yOffset)),
+    const xScaleEm = scale.x / @intToFloat(f64, info.unitsPerEm);
+    const yScaleEm = scale.y / @intToFloat(f64, info.unitsPerEm);
+    return Bbox{
+        .x_min = @floor(@intToFloat(f64, box[0]) * xScaleEm + offset.x),
+        .x_max = @ceil (@intToFloat(f64, box[2]) * xScaleEm + offset.x),
+        .y_min = @floor(@intToFloat(f64, box[1]) * yScaleEm + offset.y),
+        .y_max = @ceil (@intToFloat(f64, box[3]) * yScaleEm + offset.y),
     };
 }
 
 // Returns the offset into the font that the glyph's outline is stored at.
-fn outline_offset(font: *Font, glyph: c.SFT_Glyph) !c.uint_fast32_t {
-    const loca = (try gettable(font, "loca")) orelse
+fn outline_offset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?usize {
+    const loca = (try gettable2(ttf_mem, "loca")) orelse
 	return error.InvalidTtfNoLocaTable;
-    const glyf = (try gettable(font, "glyf")) orelse
+    const glyf = (try gettable2(ttf_mem, "glyf")) orelse
 	return error.InvalidttfNoGlyfTable;
 
     const entry = blk: {
-        if (font.info.locaFormat == 0) {
+        if (info.locaFormat == 0) {
 	    const base = loca + 2 * glyph;
-	    if (!is_safe_offset(font, base, 4))
+            if (base + 4 > ttf_mem.len)
 	        return error.InvalidTtfBadLocaTable;
             break :blk .{
-	        .this = 2 * @intCast(u32, getu16(font, base)),
-	        .next = 2 * @intCast(u32, getu16(font, base + 2)),
+	        .this = 2 * @as(u32, readTtf(u16, ttf_mem[base + 0..])),
+	        .next = 2 * @as(u32, readTtf(u16, ttf_mem[base + 2..])),
             };
         }
 
 	const base = loca + 4 * glyph;
-	if (!is_safe_offset(font, base, 8))
+        if (base + 8 > ttf_mem.len)
 	    return error.InvalidTtfBadLocaTable;
         break :blk .{
-	    .this = getu32(font, base),
-	    .next = getu32(font, base + 4),
+	    .this = readTtf(u32, ttf_mem[base + 0..]),
+	    .next = readTtf(u32, ttf_mem[base + 4..]),
         };
     };
-    return if (entry.this == entry.next) 0 else glyf + entry.this;
+    return if (entry.this == entry.next) null else glyf + entry.this;
 }
 
 // For a 'simple' outline, determines each point of the outline with a set of flags.
@@ -1047,8 +1105,7 @@ fn compound_outline(
 	// But stb_truetype scales by the L2 norm. And FreeType2 doesn't scale at all.
 	// Furthermore, Microsoft's spec doesn't even mention anything like this.
 	// It's almost as if nobody ever uses this feature anyway.
-        const outline = try outline_offset(font, glyph);
-	if (outline != 0) {
+        if (try outline_offset(font.mem, font.info, glyph)) |outline| {
 	    const basePoint = outl.points.items.len;
 	    try decode_outline(font, outline, recDepth + 1, outl);
 	    transform_points(outl.points.items.ptr[basePoint .. outl.points.items.len], &local);
