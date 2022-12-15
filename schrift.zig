@@ -281,11 +281,16 @@ fn unmap_file(font: *Font) void {
     }
 }
 
-fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
+fn readTtf(comptime T: type, ttf_mem: []const u8) T {
+    std.debug.assert(ttf_mem.len >= @sizeOf(T));
+    return std.mem.readIntBig(T, ttf_mem[0 .. @sizeOf(T)]);
+}
+
+pub fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
     if (ttf_mem.len < 12) return error.InvalidTtfTooSmall;
 
     // Check for a compatible scalerType (magic number).
-    const scalerType = std.mem.readIntBig(u32, ttf_mem[0..4]);
+    const scalerType = readTtf(u32, ttf_mem);
     if (scalerType != ttf.file_magic_one and scalerType != ttf.file_magic_two)
 	return error.InvalidTtfBadMagic;
     const head = (try gettable2(ttf_mem, "head")) orelse
@@ -293,16 +298,15 @@ fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
     const head_limit = head + 52;
     if (head_limit > ttf_mem.len)
         return error.InvalidTtfBadHeadTable;
-    //const unitsPerEm = std.mem.readIntBig(u16, ttf_mem[head + 18..][0..2]);
     const hhea = (try gettable2(ttf_mem, "hhea")) orelse
 	return error.InvalidTtfNoHheaTable;
     const hhea_limit = hhea + 36;
     if (hhea_limit > ttf_mem.len)
         return error.InvalidTtfBadHheaTable;
     return TtfInfo{
-        .unitsPerEm = std.mem.readIntBig(u16, ttf_mem[head + 18..][0..2]),
-        .locaFormat = std.mem.readIntBig(i16, ttf_mem[head + 50..][0..2]),
-        .numLongHmtx = std.mem.readIntBig(u16, ttf_mem[hhea + 34..][0..2]),
+        .unitsPerEm = readTtf(u16, ttf_mem[head + 18..]),
+        .locaFormat = readTtf(i16, ttf_mem[head + 15..]),
+        .numLongHmtx = readTtf(u16, ttf_mem[hhea + 34..]),
     };
 }
 
@@ -489,24 +493,24 @@ fn gettable(font: *Font, tag: *const [4]u8) !?c.uint_fast32_t {
 }
 fn gettable2(ttf_mem: []const u8, tag: *const [4]u8) !?c.uint_fast32_t {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
-    const numTables = std.mem.readIntBig(u16, ttf_mem[4..6]);
+    const numTables = readTtf(u16, ttf_mem[4..]);
     const limit = 12 + @intCast(usize, numTables) * 16;
     if (limit > ttf_mem.len)
         return error.InvalidTtfBadTables;
     const match_ptr = bsearch(tag, ttf_mem.ptr + 12, numTables, 16, cmpu32) orelse return null;
     const match_offset = @ptrToInt(match_ptr) - @ptrToInt(ttf_mem.ptr);
-    return std.mem.readIntBig(u32, ttf_mem[match_offset + 8..][0 .. 4]);
+    return readTtf(u32, ttf_mem[match_offset + 8..]);
 }
 
-fn cmap_fmt4(font: *Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !c.SFT_Glyph {
+fn cmap_fmt4(ttf_mem: []const u8, table: usize, charCode: u32) !u32 {
     // cmap format 4 only supports the Unicode BMP.
     if (charCode > 0xFFFF)
 	return 0;
 
     const shortCode = @intCast(c.uint_fast16_t, charCode);
-    if (!is_safe_offset(font, table, 8))
+    if (table + 8 > ttf_mem.len)
         return error.InvalidTtfBadCmapTable;
-    const segCountX2 = getu16(font, table);
+    const segCountX2 = readTtf(u16, ttf_mem[table..]);
     if (((segCountX2 & 1) != 0) or (0 == segCountX2))
         return error.InvalidTtfBadCmapTable;
 
@@ -515,69 +519,70 @@ fn cmap_fmt4(font: *Font, table: c.uint_fast32_t, charCode: c.SFT_UChar) !c.SFT_
     const startCodes     = endCodes + segCountX2 + 2;
     const idDeltas       = startCodes + segCountX2;
     const idRangeOffsets = idDeltas + segCountX2;
-    if (!is_safe_offset(font, idRangeOffsets, segCountX2))
+    if (idRangeOffsets + segCountX2 > ttf_mem.len)
         return error.InvalidTtfBadCmapTable;
 
     // Find the segment that contains shortCode by binary searching over
     // the highest codes in the segments.
-    const key = [2]u8{ @intCast(u8, charCode >> 8), @intCast(u8, charCode & 0xff) };
-    const segAddr = @ptrToInt(csearch(&key, font.mem.ptr + endCodes, segCountX2 / 2, 2, cmpu16));
-    const segIdxX2 = @intCast(c.uint_fast32_t, (segAddr - (@ptrToInt(font.mem.ptr) + endCodes)));
+    const key = [2]u8{
+        @intCast(u8, (charCode >> 8) & 0xff),
+        @intCast(u8, (charCode >> 0) & 0xff),
+    };
+    const segAddr = @ptrToInt(csearch(&key, ttf_mem.ptr + endCodes, segCountX2 / 2, 2, cmpu16));
+    const segIdxX2 = segAddr - (@ptrToInt(ttf_mem.ptr) + endCodes);
     // Look up segment info from the arrays & short circuit if the spec requires.
-    const startCode = getu16(font, startCodes + segIdxX2);
-    if (startCode > shortCode)
+    const startCode = readTtf(u16, ttf_mem[startCodes + segIdxX2..]);
+    if (startCode > charCode)
 	return 0;
-    const idDelta = getu16(font, idDeltas + segIdxX2);
-    const idRangeOffset = getu16(font, idRangeOffsets + segIdxX2);
+    const idDelta: u32 = readTtf(u16, ttf_mem[idDeltas + segIdxX2..]);
+    const idRangeOffset = readTtf(u16, ttf_mem[idRangeOffsets + segIdxX2..]);
     if (idRangeOffset == 0) {
 	// Intentional integer under- and overflow.
         // TODO: not sure if this is correct?
-	return @intCast(c.SFT_Glyph, (@intCast(u32, shortCode) + @intCast(u32, idDelta)) & 0xFFFF);
+	return (charCode + idDelta) & 0xFFFF;
     }
     // Calculate offset into glyph array and determine ultimate value.
     const idOffset = idRangeOffsets + segIdxX2 + idRangeOffset + 2 * (shortCode - startCode);
-    if (!is_safe_offset(font, idOffset, 2))
+    if (idOffset + 2 > ttf_mem.len)
         return error.InvalidTtfBadCmapTable;
-    const id = getu16(font, idOffset);
+    const id: u32 = readTtf(u16, ttf_mem[idOffset..]);
     // Intentional integer under- and overflow.
-    return if (id == 0) 0 else @intCast(c.SFT_Glyph, ((@intCast(u32, id) + @intCast(u32, idDelta)) & 0xFFFF));
+    return if (id == 0) 0 else ((id + idDelta) & 0xFFFF);
 }
 
-fn cmap_fmt12_13(font: *Font, table: c.uint_fast32_t, charCode: c.SFT_UChar, which: c_int) !c.SFT_Glyph {
-    // check that the entire header is present
-    if (!is_safe_offset(font, table, 16))
+fn cmap_fmt12_13(table: []const u8, charCode: u32, which: c_int) !u32 {
+    if (table.len < 16)
         return error.InvalidTtfBadCmapTable;
-
-    const len = getu32(font, table + 4);
-    // A minimal header is 16 bytes
-    if (len < 16)
+    const numEntries = @intCast(usize, readTtf(u32, table[12..]));
+    if (16 + 12 * numEntries > table.len)
         return error.InvalidTtfBadCmapTable;
-    if (!is_safe_offset(font, table, len))
-        return error.InvalidTtfBadCmapTable;
-
-    const numEntries = getu32(font, table + 12);
-    var i: c.uint_fast32_t = 0;
+    var i: usize = 0;
     while (i < numEntries) : (i += 1) {
-	const firstCode = getu32(font, table + (i * 12) + 16);
-	const lastCode = getu32(font, table + (i * 12) + 16 + 4);
+        const entry = 16 + i*12;
+	const firstCode = readTtf(u32, table[entry + 0..]);
+	const lastCode  = readTtf(u32, table[entry + 4..]);
 	if (charCode < firstCode or charCode > lastCode)
 	    continue;
-	const glyphOffset = getu32(font, table + (i * 12) + 16 + 8);
-	return if (which == 12) (charCode-firstCode) + glyphOffset else glyphOffset;
+	const glyphOffset = readTtf(u32, table[entry + 8..]);
+	return if (which == 12) (charCode - firstCode) + glyphOffset else glyphOffset;
     }
     return 0;
 }
 
 // Maps Unicode code points to glyph indices.
 fn glyph_id(font: *Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
-    const cmap = (try gettable(font, "cmap")) orelse
+    return try lookup_glyph(font.mem, @intCast(u21, charCode));
+}
+pub fn lookup_glyph(ttf_mem: []const u8, charCode: u32) !u32 {
+    const cmap = (try gettable2(ttf_mem, "cmap")) orelse
         return error.InvalidTtfNoCmapTable;
-
-    if (!is_safe_offset(font, cmap, 4))
+    const cmap_limit = cmap + 4;
+    if (cmap_limit > ttf_mem.len)
         return error.InvalidTtfBadCmapTable;
-    const numEntries: u32 = getu16(font, cmap + 2);
+    const numEntries: usize = readTtf(u16, ttf_mem[cmap + 2..]);
 
-    if (!is_safe_offset(font, cmap, 4 + numEntries * 8))
+    const entries_limit = 4 + numEntries * 8;
+    if (entries_limit > ttf_mem.len)
         return error.InvalidTtfBadCmapTable;
 
     // First look for a 'full repertoire'/non-BMP map.
@@ -585,16 +590,14 @@ fn glyph_id(font: *Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
         var idx: usize = 0;
         while (idx < numEntries) : (idx += 1) {
 	    const entry = cmap + 4 + idx * 8;
-	    const etype = getu16(font, entry) * 0o100 + getu16(font, entry + 2);
+	    const etype = readTtf(u16, ttf_mem[entry..]) * 0o100 + readTtf(u16, ttf_mem[entry + 2..]);
 	    // Complete unicode map
 	    if (etype == 0o004 or etype == 0o312) {
-	        const table = cmap + getu32(font, entry + 4);
-	        if (!is_safe_offset(font, table, 8))
+	        const table = cmap + readTtf(u32, ttf_mem[entry + 4..]);
+                if (table + 2 > ttf_mem.len)
                     return error.InvalidTtfBadCmapTable;
-	        // Dispatch based on cmap format.
-	        const format = getu16(font, table);
-	        switch (format) {
-		    12 => return cmap_fmt12_13(font, table, charCode, 12),
+	        switch (readTtf(u16, ttf_mem[table..])) {
+		    12 => return cmap_fmt12_13(ttf_mem[table..], charCode, 12),
                     else => return error.InvalidTtfUnsupportedCmapFormat,
 	        }
 	    }
@@ -606,15 +609,15 @@ fn glyph_id(font: *Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
         var idx: usize = 0;
         while (idx < numEntries) : (idx += 1) {
 	    const entry = cmap + 4 + idx * 8;
-	    const etype = getu16(font, entry) * 0o100 + getu16(font, entry + 2);
+	    const etype = readTtf(u16, ttf_mem[entry..]) * 0o100 + readTtf(u16, ttf_mem[entry + 2..]);
 	    // Unicode BMP
 	    if (etype == 0o003 or etype == 0o301) {
-	        const table = cmap + getu32(font, entry + 4);
-	        if (!is_safe_offset(font, table, 6))
+	        const table = cmap + readTtf(u32, ttf_mem[entry + 4..]);
+                if (table + 6 > ttf_mem.len)
                     return error.InvalidTtfBadCmapTable;
 	        // Dispatch based on cmap format.
-		switch (getu16(font, table)) {
-                    4 => return cmap_fmt4(font, table + 6, charCode),
+		switch (readTtf(u16, ttf_mem[table..])) {
+                    4 => return cmap_fmt4(ttf_mem, table + 6, charCode),
                     //6 => return cmap_fmt6(font, table + 6, charCode, glyph),
                     6 => @panic("todo"),
                     else => return error.InvalidTtfUnsupportedCmapFormat,
