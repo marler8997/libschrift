@@ -123,16 +123,32 @@ export fn sft_freefont(font: ?*c.SFT_Font) void {
 }
 
 export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
-    @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
     const font = Font.fromC(sft.font orelse unreachable);
-    const hhea = (gettable(font, "hhea") catch return -1) orelse return -1;
-    if (!is_safe_offset(font, hhea, 36))
-	return -1;
-    const factor = sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
-    metrics.ascender  = @intToFloat(f64, geti16(font, hhea + 4)) * factor;
-    metrics.descender = @intToFloat(f64, geti16(font, hhea + 6)) * factor;
-    metrics.lineGap   = @intToFloat(f64, geti16(font, hhea + 8)) * factor;
+    const m = lmetrics(font.mem, font.info, sft.yScale) catch return -1;
+    metrics.* = .{
+        .ascender = m.ascender,
+        .descender = m.descender,
+        .lineGap = m.lineGap,
+    };
     return 0;
+}
+pub const LMetrics = struct {
+    ascender: f64,
+    descender: f64,
+    lineGap: f64,
+};
+pub fn lmetrics(ttf_mem: []const u8, info: TtfInfo, yScale: f64) !LMetrics {
+    const hhea = (try gettable2(ttf_mem, "hhea")) orelse
+        return error.InvalidTtfNoHheaTable;
+    const hhea_limit = hhea + 10;
+    if (hhea_limit > ttf_mem.len)
+        return error.InvalidTtfBadHheaTable;
+    const factor = yScale / @intToFloat(f64, info.unitsPerEm);
+    return LMetrics{
+        .ascender  = factor * @intToFloat(f64, std.mem.readIntBig(i16, ttf_mem[hhea + 4..][0 .. 2])),
+        .descender = factor * @intToFloat(f64, std.mem.readIntBig(i16, ttf_mem[hhea + 6..][0 .. 2])),
+        .lineGap   = factor * @intToFloat(f64, std.mem.readIntBig(i16, ttf_mem[hhea + 8..][0 .. 2])),
+    };
 }
 
 export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: *c.SFT_Glyph) c_int {
