@@ -228,7 +228,7 @@ pub fn gmetrics(
     const advanceWidth = @intToFloat(f64, hor.advance_width) * xScaleEm;
     const leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScaleEm + offset.x;
 
-    const outline = (try outline_offset(ttf_mem, info, glyph)) orelse return GMetrics{
+    const outline = (try getOutlineOffset(ttf_mem, info, glyph)) orelse return GMetrics{
         .advanceWidth = advanceWidth,
         .leftSideBearing = leftSideBearing,
         .minWidth = 0,
@@ -251,7 +251,7 @@ pub fn gmetrics(
 
 export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
     const font = Font.fromC(sft.font orelse unreachable);
-    const outline = (outline_offset(font.mem, font.info, glyph) catch return -1) orelse return 0;
+    const outline = (getOutlineOffset(font.mem, font.info, glyph) catch return -1) orelse return 0;
     const bbox = glyph_bbox(
         font.mem,
         font.info,
@@ -716,7 +716,7 @@ fn glyph_bbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f64
 }
 
 // Returns the offset into the font that the glyph's outline is stored at.
-fn outline_offset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?usize {
+fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?usize {
     const loca = (try gettable2(ttf_mem, "loca")) orelse
         return error.InvalidTtfNoLocaTable;
     const glyf = (try gettable2(ttf_mem, "glyf")) orelse
@@ -1060,7 +1060,7 @@ fn compound_outline(
         // But stb_truetype scales by the L2 norm. And FreeType2 doesn't scale at all.
         // Furthermore, Microsoft's spec doesn't even mention anything like this.
         // It's almost as if nobody ever uses this feature anyway.
-        if (try outline_offset(font.mem, font.info, glyph)) |outline| {
+        if (try getOutlineOffset(font.mem, font.info, glyph)) |outline| {
             const basePoint = outl.points.items.len;
             try decode_outline(font, outline, recDepth + 1, outl);
             transform_points(outl.points.items.ptr[basePoint..outl.points.items.len], &local);
