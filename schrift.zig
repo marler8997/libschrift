@@ -156,10 +156,10 @@ pub const LMetrics = struct {
 };
 pub fn lmetrics(ttf_mem: []const u8, info: TtfInfo, yScale: f64) !LMetrics {
     const hhea = (try gettable2(ttf_mem, "hhea")) orelse
-        return error.InvalidTtfNoHheaTable;
+        return error.TtfNoHheaTable;
     const hhea_limit = hhea + 10;
     if (hhea_limit > ttf_mem.len)
-        return error.InvalidTtfBadHheaTable;
+        return error.TtfBadHheaTable;
     const factor = yScale / @intToFloat(f64, info.unitsPerEm);
     return LMetrics{
         .ascender = factor * @intToFloat(f64, std.mem.readIntBig(i16, ttf_mem[hhea + 4 ..][0..2])),
@@ -360,22 +360,22 @@ fn readTtf(comptime T: type, ttf_mem: []const u8) T {
 }
 
 pub fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
-    if (ttf_mem.len < 12) return error.InvalidTtfTooSmall;
+    if (ttf_mem.len < 12) return error.TtfTooSmall;
 
     // Check for a compatible scalerType (magic number).
     const scalerType = readTtf(u32, ttf_mem);
     if (scalerType != ttf.file_magic_one and scalerType != ttf.file_magic_two)
-        return error.InvalidTtfBadMagic;
+        return error.TtfBadMagic;
     const head = (try gettable2(ttf_mem, "head")) orelse
-        return error.InvalidTtfNoHeadTable;
+        return error.TtfNoHeadTable;
     const head_limit = head + 52;
     if (head_limit > ttf_mem.len)
-        return error.InvalidTtfBadHeadTable;
+        return error.TtfBadHeadTable;
     const hhea = (try gettable2(ttf_mem, "hhea")) orelse
-        return error.InvalidTtfNoHheaTable;
+        return error.TtfNoHheaTable;
     const hhea_limit = hhea + 36;
     if (hhea_limit > ttf_mem.len)
-        return error.InvalidTtfBadHheaTable;
+        return error.TtfBadHheaTable;
     return TtfInfo{
         .unitsPerEm = readTtf(u16, ttf_mem[head + 18 ..]),
         .locaFormat = readTtf(i16, ttf_mem[head + 15 ..]),
@@ -519,7 +519,7 @@ fn gettable2(ttf_mem: []const u8, tag: *const [4]u8) !?c.uint_fast32_t {
     const numTables = readTtf(u16, ttf_mem[4..]);
     const limit = 12 + @intCast(usize, numTables) * 16;
     if (limit > ttf_mem.len)
-        return error.InvalidTtfBadTables;
+        return error.TtfBadTables;
     const match_ptr = bsearch(tag, ttf_mem.ptr + 12, numTables, 16, cmpu32) orelse return null;
     const match_offset = @ptrToInt(match_ptr) - @ptrToInt(ttf_mem.ptr);
     return readTtf(u32, ttf_mem[match_offset + 8 ..]);
@@ -532,10 +532,10 @@ fn cmap_fmt4(ttf_mem: []const u8, table: usize, charCode: u32) !u32 {
 
     const shortCode = @intCast(c.uint_fast16_t, charCode);
     if (table + 8 > ttf_mem.len)
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
     const segCountX2 = readTtf(u16, ttf_mem[table..]);
     if (((segCountX2 & 1) != 0) or (0 == segCountX2))
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
 
     // Find starting positions of the relevant arrays.
     const endCodes = table + 8;
@@ -543,7 +543,7 @@ fn cmap_fmt4(ttf_mem: []const u8, table: usize, charCode: u32) !u32 {
     const idDeltas = startCodes + segCountX2;
     const idRangeOffsets = idDeltas + segCountX2;
     if (idRangeOffsets + segCountX2 > ttf_mem.len)
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
 
     // Find the segment that contains shortCode by binary searching over
     // the highest codes in the segments.
@@ -567,7 +567,7 @@ fn cmap_fmt4(ttf_mem: []const u8, table: usize, charCode: u32) !u32 {
     // Calculate offset into glyph array and determine ultimate value.
     const idOffset = idRangeOffsets + segIdxX2 + idRangeOffset + 2 * (shortCode - startCode);
     if (idOffset + 2 > ttf_mem.len)
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
     const id: u32 = readTtf(u16, ttf_mem[idOffset..]);
     // Intentional integer under- and overflow.
     return if (id == 0) 0 else ((id + idDelta) & 0xFFFF);
@@ -575,10 +575,10 @@ fn cmap_fmt4(ttf_mem: []const u8, table: usize, charCode: u32) !u32 {
 
 fn cmap_fmt12_13(table: []const u8, charCode: u32, which: c_int) !u32 {
     if (table.len < 16)
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
     const numEntries = @intCast(usize, readTtf(u32, table[12..]));
     if (16 + 12 * numEntries > table.len)
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
     var i: usize = 0;
     while (i < numEntries) : (i += 1) {
         const entry = 16 + i * 12;
@@ -598,15 +598,15 @@ fn glyph_id(font: *Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
 }
 pub fn lookup_glyph(ttf_mem: []const u8, charCode: u32) !u32 {
     const cmap = (try gettable2(ttf_mem, "cmap")) orelse
-        return error.InvalidTtfNoCmapTable;
+        return error.TtfNoCmapTable;
     const cmap_limit = cmap + 4;
     if (cmap_limit > ttf_mem.len)
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
     const numEntries: usize = readTtf(u16, ttf_mem[cmap + 2 ..]);
 
     const entries_limit = 4 + numEntries * 8;
     if (entries_limit > ttf_mem.len)
-        return error.InvalidTtfBadCmapTable;
+        return error.TtfBadCmapTable;
 
     // First look for a 'full repertoire'/non-BMP map.
     {
@@ -618,10 +618,10 @@ pub fn lookup_glyph(ttf_mem: []const u8, charCode: u32) !u32 {
             if (etype == 0o004 or etype == 0o312) {
                 const table = cmap + readTtf(u32, ttf_mem[entry + 4 ..]);
                 if (table + 2 > ttf_mem.len)
-                    return error.InvalidTtfBadCmapTable;
+                    return error.TtfBadCmapTable;
                 switch (readTtf(u16, ttf_mem[table..])) {
                     12 => return cmap_fmt12_13(ttf_mem[table..], charCode, 12),
-                    else => return error.InvalidTtfUnsupportedCmapFormat,
+                    else => return error.TtfUnsupportedCmapFormat,
                 }
             }
         }
@@ -637,13 +637,13 @@ pub fn lookup_glyph(ttf_mem: []const u8, charCode: u32) !u32 {
             if (etype == 0o003 or etype == 0o301) {
                 const table = cmap + readTtf(u32, ttf_mem[entry + 4 ..]);
                 if (table + 6 > ttf_mem.len)
-                    return error.InvalidTtfBadCmapTable;
+                    return error.TtfBadCmapTable;
                 // Dispatch based on cmap format.
                 switch (readTtf(u16, ttf_mem[table..])) {
                     4 => return cmap_fmt4(ttf_mem, table + 6, charCode),
                     //6 => return cmap_fmt6(font, table + 6, charCode, glyph),
                     6 => @panic("todo"),
-                    else => return error.InvalidTtfUnsupportedCmapFormat,
+                    else => return error.TtfUnsupportedCmapFormat,
                 }
             }
         }
@@ -658,13 +658,13 @@ const HorMetrics = struct {
 };
 fn hor_metrics(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !HorMetrics {
     const hmtx = (try gettable2(ttf_mem, "hmtx")) orelse
-        return error.InvalidTtfNoHmtxTable;
+        return error.TtfNoHmtxTable;
 
     if (glyph < info.numLongHmtx) {
         // glyph is inside long metrics segment.
         const offset = hmtx + 4 * glyph;
         if (offset + 4 > ttf_mem.len)
-            return error.InvalidTtfBadHmtxTable;
+            return error.TtfBadHmtxTable;
         return .{
             .advance_width = readTtf(u16, ttf_mem[offset + 0 ..]),
             .left_side_bearing = readTtf(i16, ttf_mem[offset + 2 ..]),
@@ -674,14 +674,14 @@ fn hor_metrics(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !HorMetrics {
     // glyph is inside short metrics segment.
     const boundary = hmtx + 4 * @intCast(usize, info.numLongHmtx);
     if (boundary < 4)
-        return error.InvalidTtfBadHmtxTable;
+        return error.TtfBadHmtxTable;
 
     const width_offset = boundary - 4;
     if (width_offset + 2 > ttf_mem.len)
-        return error.InvalidTtfBadHmtxTable;
+        return error.TtfBadHmtxTable;
     const bearing_offset = boundary + 2 * @intCast(usize, glyph - info.numLongHmtx);
     if (bearing_offset + 2 > ttf_mem.len)
-        return error.InvalidTtfBadHmtxTable;
+        return error.TtfBadHmtxTable;
     return .{
         .advance_width = readTtf(u16, ttf_mem[width_offset..]),
         .left_side_bearing = readTtf(i16, ttf_mem[bearing_offset..]),
@@ -696,7 +696,7 @@ const Bbox = struct {
 };
 fn glyph_bbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f64), outline: usize) !Bbox {
     if (outline + 10 > ttf_mem.len)
-        return error.InvalidTtfBadOutline;
+        return error.TtfBadOutline;
     const box = [4]i16{
         readTtf(i16, ttf_mem[outline + 2 ..]),
         readTtf(i16, ttf_mem[outline + 4 ..]),
@@ -704,7 +704,7 @@ fn glyph_bbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f64
         readTtf(i16, ttf_mem[outline + 8 ..]),
     };
     if (box[2] <= box[0] or box[3] <= box[1])
-        return error.InvalidTtfBadBbox;
+        return error.TtfBadBbox;
     const xScaleEm = scale.x / @intToFloat(f64, info.unitsPerEm);
     const yScaleEm = scale.y / @intToFloat(f64, info.unitsPerEm);
     return Bbox{
@@ -718,15 +718,15 @@ fn glyph_bbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f64
 // Returns the offset into the font that the glyph's outline is stored at.
 fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?usize {
     const loca = (try gettable2(ttf_mem, "loca")) orelse
-        return error.InvalidTtfNoLocaTable;
+        return error.TtfNoLocaTable;
     const glyf = (try gettable2(ttf_mem, "glyf")) orelse
-        return error.InvalidttfNoGlyfTable;
+        return error.TtfNoGlyfTable;
 
     const entry = blk: {
         if (info.locaFormat == 0) {
             const base = loca + 2 * glyph;
             if (base + 4 > ttf_mem.len)
-                return error.InvalidTtfBadLocaTable;
+                return error.TtfBadLocaTable;
             break :blk .{
                 .this = 2 * @as(u32, readTtf(u16, ttf_mem[base + 0 ..])),
                 .next = 2 * @as(u32, readTtf(u16, ttf_mem[base + 2 ..])),
@@ -735,7 +735,7 @@ fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?us
 
         const base = loca + 4 * glyph;
         if (base + 8 > ttf_mem.len)
-            return error.InvalidTtfBadLocaTable;
+            return error.TtfBadLocaTable;
         break :blk .{
             .this = readTtf(u32, ttf_mem[base + 0 ..]),
             .next = readTtf(u32, ttf_mem[base + 4 ..]),
@@ -755,12 +755,12 @@ fn simple_flags(font: *Font, offset: usize, numPts: c.uint_fast16_t, flags: [*]u
             repeat -= 1;
         } else {
             if (!is_safe_offset(font, off, 1))
-                return error.InvalidTtfBadOutline;
+                return error.TtfBadOutline;
             value = font.mem[off];
             off += 1;
             if ((value & ttf.repeat_flag) != 0) {
                 if (!is_safe_offset(font, off, 1))
-                    return error.InvalidTtfBadOutline;
+                    return error.TtfBadOutline;
                 repeat = font.mem[off];
                 off += 1;
             }
@@ -795,14 +795,14 @@ fn simple_points(
         while (i < numPts) : (i += 1) {
             if ((flags[i] & ttf.x_change_is_small) != 0) {
                 if (!is_safe_offset(font, off, 1))
-                    return error.InvalidTtfBadOutline;
+                    return error.TtfBadOutline;
                 const value = font.mem[off];
                 off += 1;
                 const is_pos = (flags[i] & ttf.x_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
             } else if (0 == (flags[i] & ttf.x_change_is_zero)) {
                 if (!is_safe_offset(font, off, 2))
-                    return error.InvalidTtfBadOutline;
+                    return error.TtfBadOutline;
                 accum += geti16(font, off);
                 off += 2;
             }
@@ -816,14 +816,14 @@ fn simple_points(
         while (i < numPts) : (i += 1) {
             if ((flags[i] & ttf.y_change_is_small) != 0) {
                 if (!is_safe_offset(font, off, 1))
-                    return error.InvalidTtfBadOutline;
+                    return error.TtfBadOutline;
                 const value = font.mem[off];
                 off += 1;
                 const is_pos = (flags[i] & ttf.y_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
             } else if (0 == (flags[i] & ttf.y_change_is_zero)) {
                 if (!is_safe_offset(font, off, 2))
-                    return error.InvalidTtfBadOutline;
+                    return error.TtfBadOutline;
                 accum += geti16(font, off);
                 off += 2;
             }
@@ -861,10 +861,10 @@ fn decode_contour(
         }
         if (0 != (flags[count - 1] & ttf.point_is_on_curve)) {
             count -= 1;
-            break :blk add(u16, basePoint, count) orelse return error.InvalidTtfTooManyPoints;
+            break :blk add(u16, basePoint, count) orelse return error.TtfTooManyPoints;
         }
 
-        const looseEnd = std.math.cast(u16, outl.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+        const looseEnd = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
         const new_point = midpoint(outl.points.items[basePoint], outl.points.items[basePoint + count - 1]);
         try outl.appendPoint(new_point);
         break :blk looseEnd;
@@ -874,7 +874,7 @@ fn decode_contour(
     var i: u16 = 0;
     while (i < count) : (i += 1) {
         // cur can't overflow because we ensure that basePoint + count < 0xFFFF before calling decode_contour().
-        const cur = add(u16, basePoint, i) orelse return error.InvalidTtfTooManyPoints;
+        const cur = add(u16, basePoint, i) orelse return error.TtfTooManyPoints;
         if (0 != (flags[i] & ttf.point_is_on_curve)) {
             if (opt_ctrl) |ctrl| {
                 try outl.appendCurve(.{ .beg = beg, .end = cur, .ctrl = ctrl });
@@ -885,7 +885,7 @@ fn decode_contour(
             opt_ctrl = null;
         } else {
             if (opt_ctrl) |ctrl| {
-                const center = std.math.cast(u16, outl.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+                const center = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
                 const new_point = midpoint(outl.points.items.ptr[ctrl], outl.points.items.ptr[cur]);
                 try outl.appendPoint(new_point);
                 try outl.appendCurve(.{ .beg = beg, .end = center, .ctrl = ctrl });
@@ -926,20 +926,20 @@ fn simple_outline(
     outl: *Outline,
 ) !void {
     std.debug.assert(numContours > 0);
-    const basePoint = std.math.cast(u16, outl.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+    const basePoint = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
 
     if (!is_safe_offset(font, offset_start, numContours * 2 + 2))
-        return error.InvalidTtfBadOutline;
+        return error.TtfBadOutline;
     var numPts = getu16(font, offset_start + (numContours - 1) * 2);
     if (numPts >= std.math.maxInt(u16))
-        return error.InvalidTtfBadOutline;
+        return error.TtfBadOutline;
     numPts += 1;
     if (outl.points.items.len > std.math.maxInt(u16) - numPts)
-        return error.InvalidTtfBadOutline;
+        return error.TtfBadOutline;
 
     try outl.points.ensureTotalCapacity(
         outl.allocator,
-        add(u16, basePoint, numPts) orelse return error.InvalidTtfTooManyPoints,
+        add(u16, basePoint, numPts) orelse return error.TtfTooManyPoints,
     );
 
     // TODO: the following commented line should work but the zig compiler
@@ -971,9 +971,9 @@ fn simple_outline(
     {
         var i: @TypeOf(numContours) = 0;
         while (i < numContours - 1) : (i += 1) {
-            const prev_limit = add(u16, endPts[i], 1) orelse return error.InvalidTtfBadOutline;
+            const prev_limit = add(u16, endPts[i], 1) orelse return error.TtfBadOutline;
             if (endPts[i + 1] < prev_limit)
-                return error.InvalidTtfBadOutline;
+                return error.TtfBadOutline;
         }
     }
     offset += 2 + @as(u32, getu16(font, offset));
@@ -986,10 +986,10 @@ fn simple_outline(
     {
         var i: @TypeOf(numContours) = 0;
         while (i < numContours) : (i += 1) {
-            const count = std.math.cast(u16, endPts[i] - beg + 1) orelse return error.InvalidTtfBadOutline;
+            const count = std.math.cast(u16, endPts[i] - beg + 1) orelse return error.TtfBadOutline;
             try decode_contour(
                 flags + beg,
-                add(u16, basePoint, beg) orelse return error.InvalidTtfTooManyPoints,
+                add(u16, basePoint, beg) orelse return error.TtfTooManyPoints,
                 count,
                 outl,
             );
@@ -1006,12 +1006,12 @@ fn compound_outline(
 ) !void {
     // Guard against infinite recursion (compound glyphs that have themselves as component).
     if (recDepth >= 4)
-        return error.InvalidTtfOutlineTooRecursive;
+        return error.TtfOutlineTooRecursive;
     var offset = offset_start;
     while (true) {
         var local = [_]f64{0} ** 6;
         if (!is_safe_offset(font, offset, 4))
-            return error.InvalidTtfBadOutline;
+            return error.TtfBadOutline;
         const flags = getu16(font, offset);
         const glyph = getu16(font, offset + 2);
         offset += 4;
@@ -1021,32 +1021,32 @@ fn compound_outline(
         // Read additional X and Y offsets (in FUnits) of this component.
         if (0 != (flags & ttf.offsets_are_large)) {
             if (!is_safe_offset(font, offset, 4))
-                return error.InvalidTtfBadOutline;
+                return error.TtfBadOutline;
             local[4] = @intToFloat(f64, geti16(font, offset));
             local[5] = @intToFloat(f64, geti16(font, offset + 2));
             offset += 4;
         } else {
             if (!is_safe_offset(font, offset, 2))
-                return error.InvalidTtfBadOutline;
+                return error.TtfBadOutline;
             local[4] = @intToFloat(f64, geti8(font, offset));
             local[5] = @intToFloat(f64, geti8(font, offset + 1));
             offset += 2;
         }
         if (0 != (flags & ttf.got_a_single_scale)) {
             if (!is_safe_offset(font, offset, 2))
-                return error.InvalidTtfBadOutline;
+                return error.TtfBadOutline;
             local[0] = @intToFloat(f64, geti16(font, offset)) / 16384.0;
             local[3] = local[0];
             offset += 2;
         } else if (0 != (flags & ttf.got_an_x_and_y_scale)) {
             if (!is_safe_offset(font, offset, 4))
-                return error.InvalidTtfBadOutline;
+                return error.TtfBadOutline;
             local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
             local[3] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
             offset += 4;
         } else if (0 != (flags & ttf.got_a_scale_matrix)) {
             if (!is_safe_offset(font, offset, 8))
-                return error.InvalidTtfBadOutline;
+                return error.TtfBadOutline;
             local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
             local[1] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
             local[2] = @intToFloat(f64, geti16(font, offset + 4)) / 16384.0;
@@ -1072,7 +1072,7 @@ fn compound_outline(
 
 fn decode_outline(font: *Font, offset: usize, recDepth: u8, outl: *Outline) !void {
     if (!is_safe_offset(font, offset, 10))
-        return error.InvalidTtfBadOutline;
+        return error.TtfBadOutline;
     const numContours = geti16(font, offset);
     if (numContours > 0) {
         // Glyph has a 'simple' outline consisting of a number of contours.
@@ -1111,17 +1111,17 @@ fn tesselate_curve(curve_in: Curve, outline: *Outline) !void {
             top -= 1;
             curve = stack[top];
         } else {
-            const ctrl0 = std.math.cast(u16, outline.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+            const ctrl0 = std.math.cast(u16, outline.points.items.len) orelse return error.TtfTooManyPoints;
             {
                 const new_point = midpoint(outline.points.items.ptr[curve.beg], outline.points.items.ptr[curve.ctrl]);
                 try outline.appendPoint(new_point);
             }
-            const ctrl1 = std.math.cast(u16, outline.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+            const ctrl1 = std.math.cast(u16, outline.points.items.len) orelse return error.TtfTooManyPoints;
             {
                 const new_point = midpoint(outline.points.items.ptr[curve.ctrl], outline.points.items.ptr[curve.end]);
                 try outline.appendPoint(new_point);
             }
-            const pivot = std.math.cast(u16, outline.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+            const pivot = std.math.cast(u16, outline.points.items.len) orelse return error.TtfTooManyPoints;
             {
                 const new_point = midpoint(outline.points.items.ptr[ctrl0], outline.points.items.ptr[ctrl1]);
                 try outline.appendPoint(new_point);
