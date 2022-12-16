@@ -30,19 +30,36 @@ const TtfInfo = struct {
 
 const Point = struct { x: f64, y: f64 };
 const Line = struct {
-    beg: c.uint_least16_t,
-    end: c.uint_least16_t,
+    beg: u16,
+    end: u16,
 };
 const Curve = struct {
-    beg: c.uint_least16_t,
-    end: c.uint_least16_t,
-    ctrl: c.uint_least16_t,
+    beg: u16,
+    end: u16,
+    ctrl: u16,
 };
 
 const Outline = struct {
+    allocator: std.mem.Allocator,
     points: std.ArrayListUnmanaged(Point) = .{},
     curves: std.ArrayListUnmanaged(Curve) = .{},
     lines: std.ArrayListUnmanaged(Line) = .{},
+    // TODO: original C implementation used an initial size of 64,
+    //       now the initial size will be 8.
+    pub fn appendPoint(self: *Outline, p: Point) !void {
+        try self.points.append(self.allocator, p);
+    }
+    pub fn appendCurve(self: *Outline, cv: Curve) !void {
+        try self.curves.append(self.allocator, cv);
+    }
+    pub fn appendLine(self: *Outline, l: Line) !void {
+        try self.lines.append(self.allocator, l);
+    }
+    pub fn deinit(self: *Outline) void {
+        self.points.deinit(self.allocator);
+        self.curves.deinit(self.allocator);
+        self.lines.deinit(self.allocator);
+    }
 };
 
 const Cell = struct {
@@ -258,9 +275,8 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
         transform[5] = sft.yOffset - bbox.y_min;
     }
 
-    var outl = Outline{};
-    defer free_outline(&outl);
-    init_outline(&outl) catch return -1;
+    var outl = Outline{ .allocator = std.heap.c_allocator };
+    defer outl.deinit();
 
     decode_outline(font, outline, 0, &outl) catch return -1;
     render_outline(&outl, &transform, image) catch return -1;
@@ -403,55 +419,6 @@ fn clip_points(points: []Point, width: f64, height: f64) void {
 fn malloc(comptime T: type, count: usize) error{OutOfMemory}![*]T {
     const ptr = c.malloc(count * @sizeOf(T)) orelse return error.OutOfMemory;
     return @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
-}
-
-fn init_outline(outl: *Outline) error{OutOfMemory}!void {
-    // TODO Smaller initial allocations
-    outl.points.items.len = 0;
-    outl.points.capacity = 64;
-    outl.points.items.ptr = try malloc(Point, outl.points.capacity);
-    outl.curves.items.len = 0;
-    outl.curves.capacity = 64;
-    outl.curves.items.ptr = try malloc(Curve, outl.curves.capacity);
-    outl.lines.items.len = 0;
-    outl.lines.capacity = 64;
-    outl.lines.items.ptr = try malloc(Line, outl.lines.capacity);
-}
-
-fn free_outline(outl: *Outline) void {
-    if (outl.points.capacity != 0) c.free(outl.points.items.ptr);
-    if (outl.curves.capacity != 0) c.free(outl.curves.items.ptr);
-    if (outl.lines.capacity != 0) c.free(outl.lines.items.ptr);
-}
-
-fn grow(comptime T: type, cap_ref: *usize, ptr_ref: *[*]T) error{ OutOfMemory, TooManyPrimitives }!void {
-    std.debug.assert(cap_ref.* > 0);
-    const next_cap = cap_ref.* * 2;
-    std.debug.assert(next_cap > cap_ref.*);
-    const ptr = c.realloc(ptr_ref.*, next_cap * @sizeOf(T)) orelse return error.OutOfMemory;
-    cap_ref.* = next_cap;
-    ptr_ref.* = @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
-}
-
-fn grow_points(outline: *Outline) error{ OutOfMemory, TooManyPoints }!void {
-    grow(Point, &outline.points.capacity, &outline.points.items.ptr) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TooManyPrimitives => return error.TooManyPoints,
-    };
-}
-
-fn grow_curves(outline: *Outline) error{ OutOfMemory, TooManyCurves }!void {
-    grow(Curve, &outline.curves.capacity, &outline.curves.items.ptr) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TooManyPrimitives => return error.TooManyCurves,
-    };
-}
-
-fn grow_lines(outline: *Outline) error{ OutOfMemory, TooManyLines }!void {
-    grow(Line, &outline.lines.capacity, &outline.lines.items.ptr) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TooManyPrimitives => return error.TooManyLines,
-    };
 }
 
 fn is_safe_offset(font: *Font, offset: usize, margin: u32) bool {
@@ -778,7 +745,7 @@ fn outline_offset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?usiz
 }
 
 // For a 'simple' outline, determines each point of the outline with a set of flags.
-fn simple_flags(font: *Font, offset: c.uint_fast32_t, numPts: c.uint_fast16_t, flags: [*]u8) !c.uint_fast32_t {
+fn simple_flags(font: *Font, offset: usize, numPts: c.uint_fast16_t, flags: [*]u8) !usize {
     var off = offset;
     var repeat: u8 = 0;
     var value: u8 = 0;
@@ -815,7 +782,7 @@ fn resolveSign(comptime T: type, is_pos: bool, value: T) T {
 // For a 'simple' outline, decodes both X and Y coordinates for each point of the outline. */
 fn simple_points(
     font: *Font,
-    offset: c.uint_fast32_t,
+    offset: usize,
     numPts: c.uint_fast16_t,
     flags: [*]u8,
     points: [*]Point,
@@ -865,10 +832,16 @@ fn simple_points(
     }
 }
 
+fn add(comptime T: type, a: T, b: T) ?T {
+    var result: T = undefined;
+    if (@addWithOverflow(T, a, b, &result)) return null;
+    return result;
+}
+
 fn decode_contour(
     flags_start: [*]u8,
-    basePointStart: c.uint_fast16_t,
-    count_start: c.uint_fast16_t,
+    basePointStart: u16,
+    count_start: u16,
     outl: *Outline,
 ) !void {
     // Skip contours with less than two points, since the following algorithm can't handle them and
@@ -879,74 +852,52 @@ fn decode_contour(
     var flags = flags_start;
     var basePoint = basePointStart;
     var count = count_start;
-    const looseEnd: c.uint_least16_t = blk: {
+    const looseEnd: u16 = blk: {
         if (0 != (flags[0] & ttf.point_is_on_curve)) {
             basePoint += 1;
             flags += 1;
             count -= 1;
-            break :blk @intCast(c.uint_least16_t, basePoint - 1);
+            break :blk basePoint - 1;
         }
         if (0 != (flags[count - 1] & ttf.point_is_on_curve)) {
             count -= 1;
-            break :blk @intCast(c.uint_least16_t, basePoint + count);
+            break :blk add(u16, basePoint, count) orelse return error.InvalidTtfTooManyPoints;
         }
 
-        if (outl.points.items.len >= outl.points.capacity)
-            try grow_points(outl);
-
-        outl.points.items.ptr[outl.points.items.len] = midpoint(outl.points.items.ptr[basePoint], outl.points.items.ptr[basePoint + count - 1]);
-        const looseEnd = @intCast(c.uint_least16_t, outl.points.items.len);
-        outl.points.items.len += 1;
+        const looseEnd = std.math.cast(u16, outl.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+        const new_point = midpoint(outl.points.items[basePoint], outl.points.items[basePoint + count - 1]);
+        try outl.appendPoint(new_point);
         break :blk looseEnd;
     };
     var beg = looseEnd;
-    var opt_ctrl: ?c.uint_least16_t = null;
-    var i: c.uint_fast16_t = 0;
+    var opt_ctrl: ?u16 = null;
+    var i: u16 = 0;
     while (i < count) : (i += 1) {
         // cur can't overflow because we ensure that basePoint + count < 0xFFFF before calling decode_contour().
-        const cur = @intCast(c.uint_least16_t, basePoint + i);
+        const cur = add(u16, basePoint, i) orelse return error.InvalidTtfTooManyPoints;
         if (0 != (flags[i] & ttf.point_is_on_curve)) {
             if (opt_ctrl) |ctrl| {
-                if (outl.curves.items.len >= outl.curves.capacity)
-                    try grow_curves(outl);
-                outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = cur, .ctrl = ctrl };
-                outl.curves.items.len += 1;
+                try outl.appendCurve(.{ .beg = beg, .end = cur, .ctrl = ctrl });
             } else {
-                if (outl.lines.items.len >= outl.lines.capacity)
-                    try grow_lines(outl);
-                outl.lines.items.ptr[outl.lines.items.len] = Line{ .beg = beg, .end = cur };
-                outl.lines.items.len += 1;
+                try outl.appendLine(.{ .beg = beg, .end = cur });
             }
             beg = cur;
             opt_ctrl = null;
         } else {
             if (opt_ctrl) |ctrl| {
-                const center: c.uint_least16_t = @intCast(c.uint_least16_t, outl.points.items.len);
-                if (outl.points.items.len >= outl.points.capacity)
-                    try grow_points(outl);
-                outl.points.items.ptr[center] = midpoint(outl.points.items.ptr[ctrl], outl.points.items.ptr[cur]);
-                outl.points.items.len += 1;
-
-                if (outl.curves.items.len >= outl.curves.capacity)
-                    try grow_curves(outl);
-                outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = center, .ctrl = ctrl };
-                outl.curves.items.len += 1;
-
+                const center = std.math.cast(u16, outl.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+                const new_point = midpoint(outl.points.items.ptr[ctrl], outl.points.items.ptr[cur]);
+                try outl.appendPoint(new_point);
+                try outl.appendCurve(.{ .beg = beg, .end = center, .ctrl = ctrl });
                 beg = center;
             }
             opt_ctrl = cur;
         }
     }
     if (opt_ctrl) |ctrl| {
-        if (outl.curves.items.len >= outl.curves.capacity)
-            try grow_curves(outl);
-        outl.curves.items.ptr[outl.curves.items.len] = Curve{ .beg = beg, .end = looseEnd, .ctrl = ctrl };
-        outl.curves.items.len += 1;
+        try outl.appendCurve(.{ .beg = beg, .end = looseEnd, .ctrl = ctrl });
     } else {
-        if (outl.lines.items.len >= outl.lines.capacity)
-            try grow_lines(outl);
-        outl.lines.items.ptr[outl.lines.items.len] = Line{ .beg = beg, .end = looseEnd };
-        outl.lines.items.len += 1;
+        try outl.appendLine(.{ .beg = beg, .end = looseEnd });
     }
 }
 
@@ -970,12 +921,12 @@ fn stackBuf(comptime T: type, comptime stack_len: usize) StackBuf(T, stack_len) 
 
 fn simple_outline(
     font: *Font,
-    offset_start: c.uint_fast32_t,
+    offset_start: usize,
     numContours: u15,
     outl: *Outline,
 ) !void {
     std.debug.assert(numContours > 0);
-    const basePoint: c.uint_fast16_t = @intCast(c.uint_fast16_t, outl.points.items.len);
+    const basePoint = std.math.cast(u16, outl.points.items.len) orelse return error.InvalidTtfTooManyPoints;
 
     if (!is_safe_offset(font, offset_start, numContours * 2 + 2))
         return error.InvalidTtfBadOutline;
@@ -986,15 +937,15 @@ fn simple_outline(
     if (outl.points.items.len > std.math.maxInt(u16) - numPts)
         return error.InvalidTtfBadOutline;
 
-    // TODO: this should be a single realloc
-    while (outl.points.capacity < basePoint + numPts) {
-        try grow_points(outl);
-    }
+    try outl.points.ensureTotalCapacity(
+        outl.allocator,
+        add(u16, basePoint, numPts) orelse return error.InvalidTtfTooManyPoints,
+    );
 
     // TODO: the following commented line should work but the zig compiler
     //       isn't optimizing it correctly which causes *extreme* slowdown
-    //var endPtsStackBuf = stackBuf(c.uint_fast16_t, 16);
-    var endPtsStackBuf: StackBuf(c.uint_fast16_t, 16) = undefined;
+    //var endPtsStackBuf = stackBuf(u16, 16);
+    var endPtsStackBuf: StackBuf(u16, 16) = undefined;
     const endPts = try endPtsStackBuf.alloc(numContours);
     defer endPtsStackBuf.free(endPts);
 
@@ -1018,9 +969,10 @@ fn simple_outline(
     // Falling endPts have no sensible interpretation and most likely only occur in malicious input.
     // Therefore, we bail, should we ever encounter such input.
     {
-        var i: c_uint = 0;
+        var i: @TypeOf(numContours) = 0;
         while (i < numContours - 1) : (i += 1) {
-            if (endPts[i + 1] < endPts[i] + 1)
+            const prev_limit = add(u16, endPts[i], 1) orelse return error.InvalidTtfBadOutline;
+            if (endPts[i + 1] < prev_limit)
                 return error.InvalidTtfBadOutline;
         }
     }
@@ -1030,12 +982,17 @@ fn simple_outline(
     try simple_points(font, offset, numPts, flags, outl.points.items.ptr + basePoint);
     outl.points.items.len = @intCast(c.uint_least16_t, outl.points.items.len + numPts);
 
-    var beg: c.uint_fast16_t = 0;
+    var beg: u16 = 0;
     {
-        var i: c_uint = 0;
+        var i: @TypeOf(numContours) = 0;
         while (i < numContours) : (i += 1) {
-            const count: c.uint_fast16_t = endPts[i] - beg + 1;
-            try decode_contour(flags + beg, basePoint + beg, count, outl);
+            const count = std.math.cast(u16, endPts[i] - beg + 1) orelse return error.InvalidTtfBadOutline;
+            try decode_contour(
+                flags + beg,
+                add(u16, basePoint, beg) orelse return error.InvalidTtfTooManyPoints,
+                count,
+                outl,
+            );
             beg = endPts[i] + 1;
         }
     }
@@ -1043,7 +1000,7 @@ fn simple_outline(
 
 fn compound_outline(
     font: *Font,
-    offset_start: c.uint_fast32_t,
+    offset_start: usize,
     recDepth: u8,
     outl: *Outline,
 ) !void {
@@ -1113,7 +1070,7 @@ fn compound_outline(
     }
 }
 
-fn decode_outline(font: *Font, offset: c.uint_fast32_t, recDepth: u8, outl: *Outline) !void {
+fn decode_outline(font: *Font, offset: usize, recDepth: u8, outl: *Outline) !void {
     if (!is_safe_offset(font, offset, 10))
         return error.InvalidTtfBadOutline;
     const numContours = geti16(font, offset);
@@ -1149,32 +1106,26 @@ fn tesselate_curve(curve_in: Curve, outline: *Outline) !void {
     var curve = curve_in;
     while (true) {
         if (is_flat(outline, curve) or top >= STACK_SIZE) {
-            if (outline.lines.items.len >= outline.lines.capacity)
-                try grow_lines(outline);
-            outline.lines.items.ptr[outline.lines.items.len] = .{ .beg = curve.beg, .end = curve.end };
-            outline.lines.items.len += 1;
+            try outline.appendLine(.{ .beg = curve.beg, .end = curve.end });
             if (top == 0) break;
             top -= 1;
             curve = stack[top];
         } else {
-            const ctrl0 = @intCast(c.uint_least16_t, outline.points.items.len);
-            if (outline.points.items.len >= outline.points.capacity)
-                try grow_points(outline);
-            outline.points.items.ptr[ctrl0] = midpoint(outline.points.items.ptr[curve.beg], outline.points.items.ptr[curve.ctrl]);
-            outline.points.items.len += 1;
-
-            const ctrl1 = @intCast(c.uint_least16_t, outline.points.items.len);
-            if (outline.points.items.len >= outline.points.capacity)
-                try grow_points(outline);
-            outline.points.items.ptr[ctrl1] = midpoint(outline.points.items.ptr[curve.ctrl], outline.points.items.ptr[curve.end]);
-            outline.points.items.len += 1;
-
-            const pivot = @intCast(c.uint_least16_t, outline.points.items.len);
-            if (outline.points.items.len >= outline.points.capacity)
-                try grow_points(outline);
-            outline.points.items.ptr[pivot] = midpoint(outline.points.items.ptr[ctrl0], outline.points.items.ptr[ctrl1]);
-            outline.points.items.len += 1;
-
+            const ctrl0 = std.math.cast(u16, outline.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+            {
+                const new_point = midpoint(outline.points.items.ptr[curve.beg], outline.points.items.ptr[curve.ctrl]);
+                try outline.appendPoint(new_point);
+            }
+            const ctrl1 = std.math.cast(u16, outline.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+            {
+                const new_point = midpoint(outline.points.items.ptr[curve.ctrl], outline.points.items.ptr[curve.end]);
+                try outline.appendPoint(new_point);
+            }
+            const pivot = std.math.cast(u16, outline.points.items.len) orelse return error.InvalidTtfTooManyPoints;
+            {
+                const new_point = midpoint(outline.points.items.ptr[ctrl0], outline.points.items.ptr[ctrl1]);
+                try outline.appendPoint(new_point);
+            }
             stack[top] = .{ .beg = curve.beg, .end = pivot, .ctrl = ctrl0 };
             top += 1;
             curve = .{ .beg = pivot, .end = curve.end, .ctrl = ctrl1 };
