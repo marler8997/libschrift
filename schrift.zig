@@ -745,23 +745,23 @@ fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?us
 }
 
 // For a 'simple' outline, determines each point of the outline with a set of flags.
-fn simple_flags(font: *Font, offset: usize, numPts: c.uint_fast16_t, flags: [*]u8) !usize {
+fn simple_flags(ttf_mem: []const u8, offset: usize, numPts: u16, flags: [*]u8) !usize {
     var off = offset;
     var repeat: u8 = 0;
     var value: u8 = 0;
-    var point_index: c.uint_fast16_t = 0;
+    var point_index: u16 = 0;
     while (point_index < numPts) : (point_index += 1) {
         if (repeat != 0) {
             repeat -= 1;
         } else {
-            if (!is_safe_offset(font, off, 1))
+            if (off + 1 > ttf_mem.len)
                 return error.TtfBadOutline;
-            value = font.mem[off];
+            value = ttf_mem[off];
             off += 1;
             if ((value & ttf.repeat_flag) != 0) {
-                if (!is_safe_offset(font, off, 1))
+                if (off + 1 > ttf_mem.len)
                     return error.TtfBadOutline;
-                repeat = font.mem[off];
+                repeat = ttf_mem[off];
                 off += 1;
             }
         }
@@ -781,9 +781,9 @@ fn resolveSign(comptime T: type, is_pos: bool, value: T) T {
 
 // For a 'simple' outline, decodes both X and Y coordinates for each point of the outline. */
 fn simple_points(
-    font: *Font,
+    ttf_mem: []const u8,
     offset: usize,
-    numPts: c.uint_fast16_t,
+    numPts: u16,
     flags: [*]u8,
     points: [*]Point,
 ) !void {
@@ -791,19 +791,19 @@ fn simple_points(
     const Accum = i32;
     {
         var accum: Accum = 0;
-        var i: c.uint_fast16_t = 0;
+        var i: u16 = 0;
         while (i < numPts) : (i += 1) {
             if ((flags[i] & ttf.x_change_is_small) != 0) {
-                if (!is_safe_offset(font, off, 1))
+                if (off + 1 > ttf_mem.len)
                     return error.TtfBadOutline;
-                const value = font.mem[off];
+                const value = ttf_mem[off];
                 off += 1;
                 const is_pos = (flags[i] & ttf.x_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
             } else if (0 == (flags[i] & ttf.x_change_is_zero)) {
-                if (!is_safe_offset(font, off, 2))
+                if (off + 2 > ttf_mem.len)
                     return error.TtfBadOutline;
-                accum += geti16(font, off);
+                accum += readTtf(i16, ttf_mem[off..]);
                 off += 2;
             }
             points[i].x = @intToFloat(f64, accum);
@@ -812,19 +812,19 @@ fn simple_points(
 
     {
         var accum: Accum = 0;
-        var i: c.uint_fast16_t = 0;
+        var i: u16 = 0;
         while (i < numPts) : (i += 1) {
             if ((flags[i] & ttf.y_change_is_small) != 0) {
-                if (!is_safe_offset(font, off, 1))
+                if (off + 1 > ttf_mem.len)
                     return error.TtfBadOutline;
-                const value = font.mem[off];
+                const value = ttf_mem[off];
                 off += 1;
                 const is_pos = (flags[i] & ttf.y_change_is_positive) != 0;
                 accum -= resolveSign(Accum, is_pos, value);
             } else if (0 == (flags[i] & ttf.y_change_is_zero)) {
-                if (!is_safe_offset(font, off, 2))
+                if (off + 2 > ttf_mem.len)
                     return error.TtfBadOutline;
-                accum += geti16(font, off);
+                accum += readTtf(i16, ttf_mem[off..]);
                 off += 2;
             }
             points[i].y = @intToFloat(f64, accum);
@@ -930,13 +930,12 @@ fn simple_outline(
 
     if (!is_safe_offset(font, offset_start, numContours * 2 + 2))
         return error.TtfBadOutline;
-    var numPts = getu16(font, offset_start + (numContours - 1) * 2);
-    if (numPts >= std.math.maxInt(u16))
+    const numPts = blk: {
+        var num = getu16(font, offset_start + (numContours - 1) * 2);
+        break :blk add(u16, num, 1) orelse return error.TtfBadOutline;
+    };
+    if (outl.points.items.len + @intCast(usize, numPts) > std.math.maxInt(u16))
         return error.TtfBadOutline;
-    numPts += 1;
-    if (outl.points.items.len > std.math.maxInt(u16) - numPts)
-        return error.TtfBadOutline;
-
     try outl.points.ensureTotalCapacity(
         outl.allocator,
         add(u16, basePoint, numPts) orelse return error.TtfTooManyPoints,
@@ -978,9 +977,9 @@ fn simple_outline(
     }
     offset += 2 + @as(u32, getu16(font, offset));
 
-    offset = try simple_flags(font, offset, numPts, flags);
-    try simple_points(font, offset, numPts, flags, outl.points.items.ptr + basePoint);
-    outl.points.items.len = @intCast(c.uint_least16_t, outl.points.items.len + numPts);
+    offset = try simple_flags(font.mem, offset, numPts, flags);
+    try simple_points(font.mem, offset, numPts, flags, outl.points.items.ptr + basePoint);
+    outl.points.items.len = outl.points.items.len + @intCast(usize, numPts);
 
     var beg: u16 = 0;
     {
