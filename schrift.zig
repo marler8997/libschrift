@@ -68,8 +68,7 @@ const Cell = struct {
 };
 const Raster = struct {
     cells: [*]Cell,
-    width: c_int,
-    height: c_int,
+    size: XY(i32),
 };
 
 const ttf = struct {
@@ -279,7 +278,15 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
     defer outl.deinit();
 
     decodeOutline(font.mem, font.info, outline, 0, &outl) catch return -1;
-    renderOutline(&outl, &transform, image) catch return -1;
+    renderOutline(
+        &outl,
+        &transform,
+        @ptrCast([*]u8, image.pixels),
+        .{
+            .x = @intCast(i32, image.width),
+            .y = @intCast(i32, image.height),
+        },
+    ) catch return -1;
     return 0;
 }
 
@@ -487,22 +494,6 @@ fn cmpu16(a: [*]const u8, b: [*]const u8) i2 {
 // Used as a comparison function for [bc]search().
 fn cmpu32(a: [*]const u8, b: [*]const u8) i2 {
     return memcmp(a, b, 4);
-}
-
-fn geti8(font: *Font, offset: usize) i8 {
-    return @bitCast(i8, font.mem[offset]);
-}
-fn geti16(font: *Font, offset: usize) i16 {
-    std.debug.assert(offset + 2 <= font.mem.len);
-    return std.mem.readIntBig(i16, @ptrCast(*const [2]u8, font.mem.ptr + offset));
-}
-fn getu16(font: *Font, offset: usize) u16 {
-    std.debug.assert(offset + 2 <= font.mem.len);
-    return std.mem.readIntBig(u16, @ptrCast(*const [2]u8, font.mem.ptr + offset));
-}
-fn getu32(font: *Font, offset: usize) u32 {
-    std.debug.assert(offset + 4 <= font.mem.len);
-    return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.mem.ptr + offset));
 }
 
 fn getTable(ttf_mem: []const u8, tag: *const [4]u8) !?c.uint_fast32_t {
@@ -1191,7 +1182,7 @@ fn drawLine(buf: Raster, origin: Point, goal: Point) void {
     while (step < numSteps) : (step += 1) {
         var xAverage = origin.x + (prevDistance + nextDistance) * halfDeltaX;
         const yDifference = (nextDistance - prevDistance) * delta.y;
-        const cptr = &buf.cells[@intCast(usize, pixel.y * buf.width + pixel.x)];
+        const cptr = &buf.cells[@intCast(usize, pixel.y * buf.size.x + pixel.x)];
         var cell = cptr.*;
         cell.cover += yDifference;
         xAverage -= @intToFloat(f64, pixel.x);
@@ -1208,7 +1199,7 @@ fn drawLine(buf: Raster, origin: Point, goal: Point) void {
 
     var xAverage = origin.x + (prevDistance + 1.0) * halfDeltaX;
     const yDifference = (1.0 - prevDistance) * delta.y;
-    const cptr = &buf.cells[@intCast(usize, pixel.y * buf.width + pixel.x)];
+    const cptr = &buf.cells[@intCast(usize, pixel.y * buf.size.x + pixel.x)];
     var cell = cptr.*;
     cell.cover += yDifference;
     xAverage -= @intToFloat(f64, pixel.x);
@@ -1229,7 +1220,7 @@ fn drawLines(outline: *Outline, buf: Raster) void {
 // Integrate the values in the buffer to arrive at the final grayscale image.
 fn postProcess(buf: Raster, image: [*]u8) void {
     var accum: f64 = 0;
-    const num = @intCast(usize, buf.width) * @intCast(usize, buf.height);
+    const num = @intCast(usize, buf.size.x) * @intCast(usize, buf.size.y);
     var i: usize = 0;
     while (i < num) : (i += 1) {
         const cell = buf.cells[i];
@@ -1241,9 +1232,13 @@ fn postProcess(buf: Raster, image: [*]u8) void {
     }
 }
 
-fn renderOutline(outl: *Outline, transform: *const [6]f64, image: c.SFT_Image) !void {
+fn renderOutline(outl: *Outline, transform: *const [6]f64, pixels: [*]u8, size: XY(i32)) !void {
     transformPoints(outl.points.items.ptr[0..outl.points.items.len], transform);
-    clipPoints(outl.points.items.ptr[0..outl.points.items.len], @intToFloat(f64, image.width), @intToFloat(f64, image.height));
+    clipPoints(
+        outl.points.items.ptr[0..outl.points.items.len],
+        @intToFloat(f64, size.x),
+        @intToFloat(f64, size.y),
+    );
 
     {
         var i: usize = 0;
@@ -1252,7 +1247,7 @@ fn renderOutline(outl: *Outline, transform: *const [6]f64, image: c.SFT_Image) !
         }
     }
 
-    const numPixels = @intCast(usize, image.width) * @intCast(usize, image.height);
+    const numPixels = @intCast(usize, size.x) * @intCast(usize, size.y);
     // TODO: the following commented line should work but the zig compiler
     //       isn't optimizing it correctly which causes *extreme* slowdown
     // Zig's 'undefined' debug checks make this ungodly slow
@@ -1266,9 +1261,8 @@ fn renderOutline(outl: *Outline, transform: *const [6]f64, image: c.SFT_Image) !
     @memset(@ptrCast([*]u8, cells), 0, numPixels * @sizeOf(@TypeOf(cells[0])));
     const buf = Raster{
         .cells = cells,
-        .width = image.width,
-        .height = image.height,
+        .size = size,
     };
     drawLines(outl, buf);
-    postProcess(buf, @ptrCast([*]u8, image.pixels));
+    postProcess(buf, pixels);
 }
