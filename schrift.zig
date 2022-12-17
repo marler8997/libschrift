@@ -256,7 +256,7 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
         (sft.flags & c.SFT_DOWNWARD_Y) != 0,
         .{ .x = sft.xScale, .y = sft.yScale },
         .{ .x = sft.xOffset, .y = sft.yOffset },
-        @ptrCast([*]u8, image.pixels)[0 .. 4 * @intCast(usize, image.width) * @intCast(usize, image.height)],
+        @ptrCast([*]u8, image.pixels)[0 .. @intCast(usize, image.width) * @intCast(usize, image.height)],
         .{ .x = @intCast(i32, image.width), .y = @intCast(i32, image.height) },
         @intCast(u32, glyph),
     ) catch return -1;
@@ -275,7 +275,7 @@ pub fn render(
 ) !void {
     std.debug.assert(out_size.x >= 0);
     std.debug.assert(out_size.y >= 0);
-    std.debug.assert(out_pixels.len == @intCast(usize, out_size.x) * @intCast(usize, out_size.y) * 4);
+    std.debug.assert(out_pixels.len == @intCast(usize, out_size.x) * @intCast(usize, out_size.y));
 
     const outline_offset = (try getOutlineOffset(ttf_mem, info, glyph)) orelse return;
     const bbox = try getGlyphBbox(ttf_mem, info, scale, offset, outline_offset);
