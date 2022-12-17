@@ -155,7 +155,7 @@ pub const LMetrics = struct {
     lineGap: f64,
 };
 pub fn lmetrics(ttf_mem: []const u8, info: TtfInfo, yScale: f64) !LMetrics {
-    const hhea = (try gettable2(ttf_mem, "hhea")) orelse
+    const hhea = (try gettable(ttf_mem, "hhea")) orelse
         return error.TtfNoHheaTable;
     const hhea_limit = hhea + 10;
     if (hhea_limit > ttf_mem.len)
@@ -366,12 +366,12 @@ pub fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
     const scalerType = readTtf(u32, ttf_mem);
     if (scalerType != ttf.file_magic_one and scalerType != ttf.file_magic_two)
         return error.TtfBadMagic;
-    const head = (try gettable2(ttf_mem, "head")) orelse
+    const head = (try gettable(ttf_mem, "head")) orelse
         return error.TtfNoHeadTable;
     const head_limit = head + 52;
     if (head_limit > ttf_mem.len)
         return error.TtfBadHeadTable;
-    const hhea = (try gettable2(ttf_mem, "hhea")) orelse
+    const hhea = (try gettable(ttf_mem, "hhea")) orelse
         return error.TtfNoHheaTable;
     const hhea_limit = hhea + 36;
     if (hhea_limit > ttf_mem.len)
@@ -511,10 +511,7 @@ fn getu32(font: *Font, offset: usize) u32 {
     return std.mem.readIntBig(u32, @ptrCast(*const [4]u8, font.mem.ptr + offset));
 }
 
-fn gettable(font: *Font, tag: *const [4]u8) !?c.uint_fast32_t {
-    return gettable2(font.mem, tag);
-}
-fn gettable2(ttf_mem: []const u8, tag: *const [4]u8) !?c.uint_fast32_t {
+fn gettable(ttf_mem: []const u8, tag: *const [4]u8) !?c.uint_fast32_t {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
     const numTables = readTtf(u16, ttf_mem[4..]);
     const limit = 12 + @intCast(usize, numTables) * 16;
@@ -597,7 +594,7 @@ fn glyph_id(font: *Font, charCode: c.SFT_UChar) !c.SFT_Glyph {
     return try lookup_glyph(font.mem, @intCast(u21, charCode));
 }
 pub fn lookup_glyph(ttf_mem: []const u8, charCode: u32) !u32 {
-    const cmap = (try gettable2(ttf_mem, "cmap")) orelse
+    const cmap = (try gettable(ttf_mem, "cmap")) orelse
         return error.TtfNoCmapTable;
     const cmap_limit = cmap + 4;
     if (cmap_limit > ttf_mem.len)
@@ -657,7 +654,7 @@ const HorMetrics = struct {
     left_side_bearing: i16,
 };
 fn hor_metrics(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !HorMetrics {
-    const hmtx = (try gettable2(ttf_mem, "hmtx")) orelse
+    const hmtx = (try gettable(ttf_mem, "hmtx")) orelse
         return error.TtfNoHmtxTable;
 
     if (glyph < info.numLongHmtx) {
@@ -717,9 +714,9 @@ fn glyph_bbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f64
 
 // Returns the offset into the font that the glyph's outline is stored at.
 fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: c.SFT_Glyph) !?usize {
-    const loca = (try gettable2(ttf_mem, "loca")) orelse
+    const loca = (try gettable(ttf_mem, "loca")) orelse
         return error.TtfNoLocaTable;
-    const glyf = (try gettable2(ttf_mem, "glyf")) orelse
+    const glyf = (try gettable(ttf_mem, "glyf")) orelse
         return error.TtfNoGlyfTable;
 
     const entry = blk: {
