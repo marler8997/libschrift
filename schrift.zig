@@ -920,7 +920,7 @@ fn stackBuf(comptime T: type, comptime stack_len: usize) StackBuf(T, stack_len) 
 }
 
 fn simple_outline(
-    font: *Font,
+    ttf_mem: []const u8,
     offset_start: usize,
     numContours: u15,
     outl: *Outline,
@@ -928,10 +928,11 @@ fn simple_outline(
     std.debug.assert(numContours > 0);
     const basePoint = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
 
-    if (!is_safe_offset(font, offset_start, numContours * 2 + 2))
+    const limit = offset_start + numContours * 2 + 2;
+    if (limit > ttf_mem.len)
         return error.TtfBadOutline;
     const numPts = blk: {
-        var num = getu16(font, offset_start + (numContours - 1) * 2);
+        var num = readTtf(u16, ttf_mem[offset_start + (numContours - 1) * 2..]);
         break :blk add(u16, num, 1) orelse return error.TtfBadOutline;
     };
     if (outl.points.items.len + @intCast(usize, numPts) > std.math.maxInt(u16))
@@ -959,7 +960,7 @@ fn simple_outline(
     {
         var i: c_uint = 0;
         while (i < numContours) : (i += 1) {
-            endPts[i] = getu16(font, offset);
+            endPts[i] = readTtf(u16, ttf_mem[offset..]);
             offset += 2;
         }
     }
@@ -975,10 +976,10 @@ fn simple_outline(
                 return error.TtfBadOutline;
         }
     }
-    offset += 2 + @as(u32, getu16(font, offset));
+    offset += 2 + @as(usize, readTtf(u16, ttf_mem[offset..]));
 
-    offset = try simple_flags(font.mem, offset, numPts, flags);
-    try simple_points(font.mem, offset, numPts, flags, outl.points.items.ptr + basePoint);
+    offset = try simple_flags(ttf_mem, offset, numPts, flags);
+    try simple_points(ttf_mem, offset, numPts, flags, outl.points.items.ptr + basePoint);
     outl.points.items.len = outl.points.items.len + @intCast(usize, numPts);
 
     var beg: u16 = 0;
@@ -1075,7 +1076,7 @@ fn decode_outline(font: *Font, offset: usize, recDepth: u8, outl: *Outline) !voi
     const numContours = geti16(font, offset);
     if (numContours > 0) {
         // Glyph has a 'simple' outline consisting of a number of contours.
-        return simple_outline(font, offset + 10, @intCast(u15, numContours), outl);
+        return simple_outline(font.mem, offset + 10, @intCast(u15, numContours), outl);
     } else if (numContours < 0) {
         // Glyph has a compound outline combined from mutiple other outlines.
         return compound_outline(font, offset + 10, recDepth, outl);
