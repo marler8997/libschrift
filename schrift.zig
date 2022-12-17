@@ -250,44 +250,57 @@ pub fn gmetrics(
 
 export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
     const font = Font.fromC(sft.font orelse unreachable);
-    const outline = (getOutlineOffset(font.mem, font.info, @intCast(u32, glyph)) catch return -1) orelse return 0;
-    const bbox = getGlyphBbox(
+    render(
         font.mem,
         font.info,
+        (sft.flags & c.SFT_DOWNWARD_Y) != 0,
         .{ .x = sft.xScale, .y = sft.yScale },
         .{ .x = sft.xOffset, .y = sft.yOffset },
-        outline,
+        @ptrCast([*]u8, image.pixels)[0 .. 4 * @intCast(usize, image.width) * @intCast(usize, image.height)],
+        .{ .x = @intCast(i32, image.width), .y = @intCast(i32, image.height) },
+        @intCast(u32, glyph),
     ) catch return -1;
+    return 0;
+}
+
+pub fn render(
+    ttf_mem: []const u8,
+    info: TtfInfo,
+    downward: bool,
+    scale: XY(f64),
+    offset: XY(f64),
+    out_pixels: []u8,
+    out_size: XY(i32),
+    glyph: u32,
+) !void {
+    std.debug.assert(out_size.x >= 0);
+    std.debug.assert(out_size.y >= 0);
+    std.debug.assert(out_pixels.len == @intCast(usize, out_size.x) * @intCast(usize, out_size.y) * 4);
+
+    const outline_offset = (try getOutlineOffset(ttf_mem, info, glyph)) orelse return;
+    const bbox = try getGlyphBbox(ttf_mem, info, scale, offset, outline_offset);
+
     // Set up the transformation matrix such that
     // the transformed bounding boxes min corner lines
     // up with the (0, 0) point.
     var transform: [6]f64 = undefined;
-    transform[0] = sft.xScale / @intToFloat(f64, font.info.unitsPerEm);
+    transform[0] = scale.x / @intToFloat(f64, info.unitsPerEm);
     transform[1] = 0.0;
     transform[2] = 0.0;
-    transform[4] = sft.xOffset - bbox.x_min;
-    if ((sft.flags & c.SFT_DOWNWARD_Y) != 0) {
-        transform[3] = -sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
-        transform[5] = bbox.y_max - sft.yOffset;
+    transform[4] = offset.x - bbox.x_min;
+    if (downward) {
+        transform[3] = -scale.y / @intToFloat(f64, info.unitsPerEm);
+        transform[5] = bbox.y_max - offset.y;
     } else {
-        transform[3] = sft.yScale / @intToFloat(f64, font.info.unitsPerEm);
-        transform[5] = sft.yOffset - bbox.y_min;
+        transform[3] = scale.y / @intToFloat(f64, info.unitsPerEm);
+        transform[5] = offset.y - bbox.y_min;
     }
 
     var outl = Outline{ .allocator = std.heap.c_allocator };
     defer outl.deinit();
 
-    decodeOutline(font.mem, font.info, outline, 0, &outl) catch return -1;
-    renderOutline(
-        &outl,
-        &transform,
-        @ptrCast([*]u8, image.pixels),
-        .{
-            .x = @intCast(i32, image.width),
-            .y = @intCast(i32, image.height),
-        },
-    ) catch return -1;
-    return 0;
+    try decodeOutline(ttf_mem, info, outline_offset, 0, &outl);
+    try renderOutline(&outl, &transform, out_pixels.ptr, out_size);
 }
 
 const win32 = struct {
