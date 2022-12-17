@@ -278,7 +278,7 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
     var outl = Outline{ .allocator = std.heap.c_allocator };
     defer outl.deinit();
 
-    decode_outline(font, outline, 0, &outl) catch return -1;
+    decodeOutline(font.mem, font.info, outline, 0, &outl) catch return -1;
     render_outline(&outl, &transform, image) catch return -1;
     return 0;
 }
@@ -919,7 +919,7 @@ fn stackBuf(comptime T: type, comptime stack_len: usize) StackBuf(T, stack_len) 
     return .{};
 }
 
-fn simple_outline(
+fn simpleOutline(
     ttf_mem: []const u8,
     offset_start: usize,
     numContours: u15,
@@ -998,8 +998,9 @@ fn simple_outline(
     }
 }
 
-fn compound_outline(
-    font: *Font,
+fn compoundOutline(
+    ttf_mem: []const u8,
+    info: TtfInfo,
     offset_start: usize,
     recDepth: u8,
     outl: *Outline,
@@ -1010,47 +1011,47 @@ fn compound_outline(
     var offset = offset_start;
     while (true) {
         var local = [_]f64{0} ** 6;
-        if (!is_safe_offset(font, offset, 4))
+        if (offset + 4 > ttf_mem.len)
             return error.TtfBadOutline;
-        const flags = getu16(font, offset);
-        const glyph = getu16(font, offset + 2);
+        const flags = readTtf(u16, ttf_mem[offset + 0..]);
+        const glyph = readTtf(u16, ttf_mem[offset + 2..]);
         offset += 4;
         // We don't implement point matching, and neither does stb_truetype for that matter.
         if (0 == (flags & ttf.actual_xy_offsets))
             return error.TtfPointMatchingNotSupported;
         // Read additional X and Y offsets (in FUnits) of this component.
         if (0 != (flags & ttf.offsets_are_large)) {
-            if (!is_safe_offset(font, offset, 4))
+            if (offset + 4 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[4] = @intToFloat(f64, geti16(font, offset));
-            local[5] = @intToFloat(f64, geti16(font, offset + 2));
+            local[4] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 0..]));
+            local[5] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 2..]));
             offset += 4;
         } else {
-            if (!is_safe_offset(font, offset, 2))
+            if (offset + 2 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[4] = @intToFloat(f64, geti8(font, offset));
-            local[5] = @intToFloat(f64, geti8(font, offset + 1));
+            local[4] = @intToFloat(f64, @bitCast(i8, ttf_mem[offset + 0]));
+            local[5] = @intToFloat(f64, @bitCast(i8, ttf_mem[offset + 1]));
             offset += 2;
         }
         if (0 != (flags & ttf.got_a_single_scale)) {
-            if (!is_safe_offset(font, offset, 2))
+            if (offset + 2 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(f64, geti16(font, offset)) / 16384.0;
+            local[0] = @intToFloat(f64, readTtf(i16, ttf_mem[offset..])) / 16384.0;
             local[3] = local[0];
             offset += 2;
         } else if (0 != (flags & ttf.got_an_x_and_y_scale)) {
-            if (!is_safe_offset(font, offset, 4))
+            if (offset + 4 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
-            local[3] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
+            local[0] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
+            local[3] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
             offset += 4;
         } else if (0 != (flags & ttf.got_a_scale_matrix)) {
-            if (!is_safe_offset(font, offset, 8))
+            if (offset + 8 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(f64, geti16(font, offset + 0)) / 16384.0;
-            local[1] = @intToFloat(f64, geti16(font, offset + 2)) / 16384.0;
-            local[2] = @intToFloat(f64, geti16(font, offset + 4)) / 16384.0;
-            local[3] = @intToFloat(f64, geti16(font, offset + 6)) / 16384.0;
+            local[0] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
+            local[1] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
+            local[2] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 4..])) / 16384.0;
+            local[3] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 6..])) / 16384.0;
             offset += 8;
         } else {
             local[0] = 1.0;
@@ -1060,9 +1061,9 @@ fn compound_outline(
         // But stb_truetype scales by the L2 norm. And FreeType2 doesn't scale at all.
         // Furthermore, Microsoft's spec doesn't even mention anything like this.
         // It's almost as if nobody ever uses this feature anyway.
-        if (try getOutlineOffset(font.mem, font.info, glyph)) |outline| {
+        if (try getOutlineOffset(ttf_mem, info, glyph)) |outline| {
             const basePoint = outl.points.items.len;
-            try decode_outline(font, outline, recDepth + 1, outl);
+            try decodeOutline(ttf_mem, info, outline, recDepth + 1, outl);
             transform_points(outl.points.items.ptr[basePoint..outl.points.items.len], &local);
         }
 
@@ -1070,16 +1071,16 @@ fn compound_outline(
     }
 }
 
-fn decode_outline(font: *Font, offset: usize, recDepth: u8, outl: *Outline) !void {
-    if (!is_safe_offset(font, offset, 10))
+fn decodeOutline(ttf_mem: []const u8, info: TtfInfo, offset: usize, recDepth: u8, outl: *Outline) !void {
+    if (offset + 10 > ttf_mem.len)
         return error.TtfBadOutline;
-    const numContours = geti16(font, offset);
+    const numContours = readTtf(i16, ttf_mem[offset..]);
     if (numContours > 0) {
         // Glyph has a 'simple' outline consisting of a number of contours.
-        return simple_outline(font.mem, offset + 10, @intCast(u15, numContours), outl);
+        return simpleOutline(ttf_mem, offset + 10, @intCast(u15, numContours), outl);
     } else if (numContours < 0) {
         // Glyph has a compound outline combined from mutiple other outlines.
-        return compound_outline(font, offset + 10, recDepth, outl);
+        return compoundOutline(ttf_mem, info, offset + 10, recDepth, outl);
     }
 }
 
