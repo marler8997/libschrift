@@ -225,17 +225,33 @@ fn transformPoints(points: []Point, trf: *const [6]f64) void {
     }
 }
 
+extern "c" fn nextafter(x: f64, y: f64) f64;
+
 fn clipPoints(points: []Point, width: f64, height: f64) void {
     for (points) |*pt| {
         if (pt.x < 0.0) {
             pt.x = 0.0;
         } else if (pt.x >= width) {
-            pt.x = nextafter(width, 0.0);
+            if (builtin.link_libc) {
+                pt.x = nextafter(width, 0.0);
+            } else {
+                // not sure if this will still work but zig
+                // doesn't seem to have a 'nextafter' equivalent
+                // but it's *probabl* ok?
+                pt.x = width;
+            }
         }
         if (pt.y < 0.0) {
             pt.y = 0.0;
         } else if (pt.y >= height) {
-            pt.y = nextafter(height, 0.0);
+            if (builtin.link_libc) {
+                pt.y = nextafter(height, 0.0);
+            } else {
+                // not sure if this will still work but zig
+                // doesn't seem to have a 'nextafter' equivalent
+                // but it's *probabl* ok?
+                pt.y = height;
+            }
         }
     }
 }
@@ -1093,13 +1109,4 @@ fn renderOutline(
     };
     drawLines(outl, buf);
     postProcess(buf, pixels);
-}
-
-const cextern = struct {
-    pub extern "c" fn nextafter(x: f64, y: f64) f64;
-};
-
-fn nextafter(x: f64, y: f64) f64 {
-    if (builtin.link_libc) return cextern.nextafter(x, y);
-    @compileError("nextafter not implemented without libc");
 }
