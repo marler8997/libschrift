@@ -33,7 +33,7 @@ pub fn main() !void {
     const glass = try readFile(arena.allocator(), "resources/glass.utf8");
 
     const hgap = 1;
-    
+
     var image_width: u32 = 0;
     var line_count: u32 = 0;
     var max_glyph_width: u32 = 0;
@@ -113,11 +113,15 @@ pub fn main() !void {
                 .y = gmetrics.minHeight,
             };
 
+            var render_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer render_arena.deinit();
+
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
             // TODO: render directly into our line_buf by enhancing
             //       the API to take a "stride"
             const pixel_buf_len = @intCast(usize, size.x) * @intCast(usize, size.y);
             try schrift.render(
+                render_arena.allocator(),
                 ttf_mem,
                 ttf_info,
                 downward,

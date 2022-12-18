@@ -19,25 +19,24 @@ const Curve = struct {
 };
 
 const Outline = struct {
-    allocator: std.mem.Allocator,
     points: std.ArrayListUnmanaged(Point) = .{},
     curves: std.ArrayListUnmanaged(Curve) = .{},
     lines: std.ArrayListUnmanaged(Line) = .{},
     // TODO: original C implementation used an initial size of 64,
     //       now the initial size will be 8.
-    pub fn appendPoint(self: *Outline, p: Point) !void {
-        try self.points.append(self.allocator, p);
+    pub fn appendPoint(self: *Outline, allocator: std.mem.Allocator, p: Point) !void {
+        try self.points.append(allocator, p);
     }
-    pub fn appendCurve(self: *Outline, cv: Curve) !void {
-        try self.curves.append(self.allocator, cv);
+    pub fn appendCurve(self: *Outline, allocator: std.mem.Allocator, cv: Curve) !void {
+        try self.curves.append(allocator, cv);
     }
-    pub fn appendLine(self: *Outline, l: Line) !void {
-        try self.lines.append(self.allocator, l);
+    pub fn appendLine(self: *Outline, allocator: std.mem.Allocator, l: Line) !void {
+        try self.lines.append(allocator, l);
     }
-    pub fn deinit(self: *Outline) void {
-        self.points.deinit(self.allocator);
-        self.curves.deinit(self.allocator);
-        self.lines.deinit(self.allocator);
+    pub fn deinit(self: *Outline, allocator: std.mem.Allocator) void {
+        self.points.deinit(allocator);
+        self.curves.deinit(allocator);
+        self.lines.deinit(allocator);
     }
 };
 
@@ -46,7 +45,7 @@ const Cell = struct {
     cover: f64,
 };
 const Raster = struct {
-    cells: [*]Cell,
+    cells: []Cell,
     size: XY(i32),
 };
 
@@ -139,6 +138,7 @@ pub fn gmetrics(
 }
 
 pub fn render(
+    allocator: std.mem.Allocator,
     ttf_mem: []const u8,
     info: TtfInfo,
     downward: bool,
@@ -171,11 +171,11 @@ pub fn render(
         transform[5] = offset.y - bbox.y_min;
     }
 
-    var outl = Outline{ .allocator = std.heap.c_allocator };
-    defer outl.deinit();
+    var outl = Outline{};
+    defer outl.deinit(allocator);
 
-    try decodeOutline(ttf_mem, info, outline_offset, 0, &outl);
-    try renderOutline(&outl, &transform, out_pixels.ptr, out_size);
+    try decodeOutline(allocator, ttf_mem, info, outline_offset, 0, &outl);
+    try renderOutline(allocator, &outl, &transform, out_pixels.ptr, out_size);
 }
 
 fn readTtf(comptime T: type, ttf_mem: []const u8) T {
@@ -238,11 +238,6 @@ fn clipPoints(points: []Point, width: f64, height: f64) void {
             pt.y = nextafter(height, 0.0);
         }
     }
-}
-
-fn malloc(comptime T: type, count: usize) error{OutOfMemory}![*]T {
-    const ptr = std.c.malloc(count * @sizeOf(T)) orelse return error.OutOfMemory;
-    return @ptrCast([*]T, @alignCast(@alignOf(T), ptr));
 }
 
 fn bsearch(
@@ -540,7 +535,7 @@ fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !?usize {
 }
 
 // For a 'simple' outline, determines each point of the outline with a set of flags.
-fn simpleFlags(ttf_mem: []const u8, offset: usize, numPts: u16, flags: [*]u8) !usize {
+fn simpleFlags(ttf_mem: []const u8, offset: usize, numPts: u16, flags: []u8) !usize {
     var off = offset;
     var repeat: u8 = 0;
     var value: u8 = 0;
@@ -579,8 +574,8 @@ fn simplePoints(
     ttf_mem: []const u8,
     offset: usize,
     numPts: u16,
-    flags: [*]u8,
-    points: [*]Point,
+    flags: []const u8,
+    points: []Point,
 ) !void {
     var off = offset;
     const Accum = i32;
@@ -634,7 +629,8 @@ fn add(comptime T: type, a: T, b: T) ?T {
 }
 
 fn decodeContour(
-    flags_start: [*]u8,
+    allocator: std.mem.Allocator,
+    flags_start: []const u8,
     basePointStart: u16,
     count_start: u16,
     outl: *Outline,
@@ -650,7 +646,7 @@ fn decodeContour(
     const looseEnd: u16 = blk: {
         if (0 != (flags[0] & ttf.point_is_on_curve)) {
             basePoint += 1;
-            flags += 1;
+            flags = flags[1..];
             count -= 1;
             break :blk basePoint - 1;
         }
@@ -661,7 +657,7 @@ fn decodeContour(
 
         const looseEnd = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
         const new_point = midpoint(outl.points.items[basePoint], outl.points.items[basePoint + count - 1]);
-        try outl.appendPoint(new_point);
+        try outl.appendPoint(allocator, new_point);
         break :blk looseEnd;
     };
     var beg = looseEnd;
@@ -672,9 +668,9 @@ fn decodeContour(
         const cur = add(u16, basePoint, i) orelse return error.TtfTooManyPoints;
         if (0 != (flags[i] & ttf.point_is_on_curve)) {
             if (opt_ctrl) |ctrl| {
-                try outl.appendCurve(.{ .beg = beg, .end = cur, .ctrl = ctrl });
+                try outl.appendCurve(allocator, .{ .beg = beg, .end = cur, .ctrl = ctrl });
             } else {
-                try outl.appendLine(.{ .beg = beg, .end = cur });
+                try outl.appendLine(allocator, .{ .beg = beg, .end = cur });
             }
             beg = cur;
             opt_ctrl = null;
@@ -682,31 +678,30 @@ fn decodeContour(
             if (opt_ctrl) |ctrl| {
                 const center = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
                 const new_point = midpoint(outl.points.items.ptr[ctrl], outl.points.items.ptr[cur]);
-                try outl.appendPoint(new_point);
-                try outl.appendCurve(.{ .beg = beg, .end = center, .ctrl = ctrl });
+                try outl.appendPoint(allocator, new_point);
+                try outl.appendCurve(allocator, .{ .beg = beg, .end = center, .ctrl = ctrl });
                 beg = center;
             }
             opt_ctrl = cur;
         }
     }
     if (opt_ctrl) |ctrl| {
-        try outl.appendCurve(.{ .beg = beg, .end = looseEnd, .ctrl = ctrl });
+        try outl.appendCurve(allocator, .{ .beg = beg, .end = looseEnd, .ctrl = ctrl });
     } else {
-        try outl.appendLine(.{ .beg = beg, .end = looseEnd });
+        try outl.appendLine(allocator, .{ .beg = beg, .end = looseEnd });
     }
 }
 
 fn StackBuf(comptime T: type, comptime stack_len: usize) type {
     return struct {
         buf: [stack_len]T = undefined,
-        fn alloc(self: *@This(), len: usize) error{OutOfMemory}![*]T {
+        fn alloc(self: *@This(), allocator: std.mem.Allocator, len: usize) error{OutOfMemory}![]T {
             if (len <= stack_len) return &self.buf;
-            return try malloc(T, len);
+            return try allocator.alloc(T, len);
         }
-        fn free(self: *@This(), ptr: [*]T) void {
-            if (ptr != &self.buf) {
-                std.c.free(ptr);
-            }
+        fn free(allocator: std.mem.Allocator, buf: []T) void {
+            if (buf.len <= stack_len) return;
+            allocator.free(buf);
         }
     };
 }
@@ -715,6 +710,7 @@ fn stackBuf(comptime T: type, comptime stack_len: usize) StackBuf(T, stack_len) 
 }
 
 fn simpleOutline(
+    allocator: std.mem.Allocator,
     ttf_mem: []const u8,
     offset_start: usize,
     numContours: u15,
@@ -732,24 +728,24 @@ fn simpleOutline(
     };
     if (outl.points.items.len + @intCast(usize, numPts) > std.math.maxInt(u16))
         return error.TtfBadOutline;
-    try outl.points.ensureTotalCapacity(
-        outl.allocator,
-        add(u16, basePoint, numPts) orelse return error.TtfTooManyPoints,
-    );
+    const new_points_len = add(u16, basePoint, numPts) orelse return error.TtfTooManyPoints;
+    try outl.points.ensureTotalCapacity(allocator, new_points_len);
 
     // TODO: the following commented line should work but the zig compiler
     //       isn't optimizing it correctly which causes *extreme* slowdown
     //var endPtsStackBuf = stackBuf(u16, 16);
-    var endPtsStackBuf: StackBuf(u16, 16) = undefined;
-    const endPts = try endPtsStackBuf.alloc(numContours);
-    defer endPtsStackBuf.free(endPts);
+    const PtsBuf = StackBuf(u16, 16);
+    var endPtsStackBuf: PtsBuf = undefined;
+    const endPts = try endPtsStackBuf.alloc(allocator, numContours);
+    defer PtsBuf.free(allocator, endPts);
 
     // TODO: the following commented line should work but the zig compiler
     //       isn't optimizing it correctly which causes *extreme* slowdown
     //var flagsStackBuf = stackBuf(u8, 128);
-    var flagsStackBuf: StackBuf(u8, 128) = undefined;
-    const flags = try flagsStackBuf.alloc(numPts);
-    defer flagsStackBuf.free(flags);
+    const FlagsBuf = StackBuf(u8, 128);
+    var flagsStackBuf: FlagsBuf = undefined;
+    const flags = try flagsStackBuf.alloc(allocator, numPts);
+    defer FlagsBuf.free(allocator, flags);
 
     var offset = offset_start;
     {
@@ -774,8 +770,8 @@ fn simpleOutline(
     offset += 2 + @as(usize, readTtf(u16, ttf_mem[offset..]));
 
     offset = try simpleFlags(ttf_mem, offset, numPts, flags);
-    try simplePoints(ttf_mem, offset, numPts, flags, outl.points.items.ptr + basePoint);
-    outl.points.items.len = outl.points.items.len + @intCast(usize, numPts);
+    outl.points.items.len = new_points_len;
+    try simplePoints(ttf_mem, offset, numPts, flags, outl.points.items[basePoint..]);
 
     var beg: u16 = 0;
     {
@@ -783,7 +779,8 @@ fn simpleOutline(
         while (i < numContours) : (i += 1) {
             const count = std.math.cast(u16, endPts[i] - beg + 1) orelse return error.TtfBadOutline;
             try decodeContour(
-                flags + beg,
+                allocator,
+                flags[beg..],
                 add(u16, basePoint, beg) orelse return error.TtfTooManyPoints,
                 count,
                 outl,
@@ -794,6 +791,7 @@ fn simpleOutline(
 }
 
 fn compoundOutline(
+    allocator: std.mem.Allocator,
     ttf_mem: []const u8,
     info: TtfInfo,
     offset_start: usize,
@@ -858,7 +856,7 @@ fn compoundOutline(
         // It's almost as if nobody ever uses this feature anyway.
         if (try getOutlineOffset(ttf_mem, info, glyph)) |outline| {
             const basePoint = outl.points.items.len;
-            try decodeOutline(ttf_mem, info, outline, recDepth + 1, outl);
+            try decodeOutline(allocator, ttf_mem, info, outline, recDepth + 1, outl);
             transformPoints(outl.points.items.ptr[basePoint..outl.points.items.len], &local);
         }
 
@@ -866,16 +864,23 @@ fn compoundOutline(
     }
 }
 
-fn decodeOutline(ttf_mem: []const u8, info: TtfInfo, offset: usize, recDepth: u8, outl: *Outline) !void {
+fn decodeOutline(
+    allocator: std.mem.Allocator,
+    ttf_mem: []const u8,
+    info: TtfInfo,
+    offset: usize,
+    recDepth: u8,
+    outl: *Outline,
+) !void {
     if (offset + 10 > ttf_mem.len)
         return error.TtfBadOutline;
     const numContours = readTtf(i16, ttf_mem[offset..]);
     if (numContours > 0) {
         // Glyph has a 'simple' outline consisting of a number of contours.
-        return simpleOutline(ttf_mem, offset + 10, @intCast(u15, numContours), outl);
+        return simpleOutline(allocator, ttf_mem, offset + 10, @intCast(u15, numContours), outl);
     } else if (numContours < 0) {
         // Glyph has a compound outline combined from mutiple other outlines.
-        return compoundOutline(ttf_mem, info, offset + 10, recDepth, outl);
+        return compoundOutline(allocator, ttf_mem, info, offset + 10, recDepth, outl);
     }
 }
 
@@ -891,7 +896,7 @@ fn isFlat(outline: Outline, curve: Curve) bool {
     return area2 <= maxArea2;
 }
 
-fn tesselateCurve(curve_in: Curve, outline: *Outline) !void {
+fn tesselateCurve(allocator: std.mem.Allocator, curve_in: Curve, outline: *Outline) !void {
     // From my tests I can conclude that this stack barely reaches a top height
     // of 4 elements even for the largest font sizes I'm willing to support. And
     // as space requirements should only grow logarithmically, I think 10 is
@@ -902,7 +907,7 @@ fn tesselateCurve(curve_in: Curve, outline: *Outline) !void {
     var curve = curve_in;
     while (true) {
         if (isFlat(outline.*, curve) or top >= STACK_SIZE) {
-            try outline.appendLine(.{ .beg = curve.beg, .end = curve.end });
+            try outline.appendLine(allocator, .{ .beg = curve.beg, .end = curve.end });
             if (top == 0) break;
             top -= 1;
             curve = stack[top];
@@ -910,17 +915,17 @@ fn tesselateCurve(curve_in: Curve, outline: *Outline) !void {
             const ctrl0 = std.math.cast(u16, outline.points.items.len) orelse return error.TtfTooManyPoints;
             {
                 const new_point = midpoint(outline.points.items.ptr[curve.beg], outline.points.items.ptr[curve.ctrl]);
-                try outline.appendPoint(new_point);
+                try outline.appendPoint(allocator, new_point);
             }
             const ctrl1 = std.math.cast(u16, outline.points.items.len) orelse return error.TtfTooManyPoints;
             {
                 const new_point = midpoint(outline.points.items.ptr[curve.ctrl], outline.points.items.ptr[curve.end]);
-                try outline.appendPoint(new_point);
+                try outline.appendPoint(allocator, new_point);
             }
             const pivot = std.math.cast(u16, outline.points.items.len) orelse return error.TtfTooManyPoints;
             {
                 const new_point = midpoint(outline.points.items.ptr[ctrl0], outline.points.items.ptr[ctrl1]);
-                try outline.appendPoint(new_point);
+                try outline.appendPoint(allocator, new_point);
             }
             stack[top] = .{ .beg = curve.beg, .end = pivot, .ctrl = ctrl0 };
             top += 1;
@@ -1048,7 +1053,13 @@ fn postProcess(buf: Raster, image: [*]u8) void {
     }
 }
 
-fn renderOutline(outl: *Outline, transform: *const [6]f64, pixels: [*]u8, size: XY(i32)) !void {
+fn renderOutline(
+    allocator: std.mem.Allocator,
+    outl: *Outline,
+    transform: *const [6]f64,
+    pixels: [*]u8,
+    size: XY(i32),
+) !void {
     transformPoints(outl.points.items.ptr[0..outl.points.items.len], transform);
     clipPoints(
         outl.points.items.ptr[0..outl.points.items.len],
@@ -1059,7 +1070,7 @@ fn renderOutline(outl: *Outline, transform: *const [6]f64, pixels: [*]u8, size: 
     {
         var i: usize = 0;
         while (i < outl.curves.items.len) : (i += 1) {
-            try tesselateCurve(outl.curves.items.ptr[i], outl);
+            try tesselateCurve(allocator, outl.curves.items.ptr[i], outl);
         }
     }
 
@@ -1069,9 +1080,10 @@ fn renderOutline(outl: *Outline, transform: *const [6]f64, pixels: [*]u8, size: 
     // Zig's 'undefined' debug checks make this ungodly slow
     const stack_len = if (builtin.mode == .Debug) 0 else 128 * 128;
     //var cellStackBuf = stackBuf(Cell, stack_len);
-    var cellStackBuf: StackBuf(Cell, stack_len) = undefined;
-    const cells = try cellStackBuf.alloc(numPixels);
-    defer cellStackBuf.free(cells);
+    const CellBuf = StackBuf(Cell, stack_len);
+    var cellStackBuf: CellBuf = undefined;
+    const cells = try cellStackBuf.alloc(allocator, numPixels);
+    defer CellBuf.free(allocator, cells);
 
     // TODO: I wonder if this could be removed?
     @memset(@ptrCast([*]u8, cells), 0, numPixels * @sizeOf(@TypeOf(cells[0])));

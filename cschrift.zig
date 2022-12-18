@@ -140,6 +140,7 @@ const win32 = struct {
 export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
     const font = Font.fromC(sft.font orelse unreachable);
     schrift.render(
+        std.heap.c_allocator,
         font.mem,
         font.info,
         (sft.flags & c.SFT_DOWNWARD_Y) != 0,
