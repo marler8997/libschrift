@@ -12,8 +12,8 @@ all: libschrift.a demo stress
 
 MODE ?= ReleaseFast
 
-libschrift.a: schrift.h schrift.zig
-	zig build-lib -O$(MODE) -static -I. schrift.zig -lc
+libschrift.a: schrift.h cschrift.zig schrift.zig
+	zig build-lib -O$(MODE) -static -I. --name schrift cschrift.zig -lc
 
 demo: libschrift.a
 	zig build-exe -O$(MODE) $(EXTRA_CFLAGS) demo.c $(EXTRAS_CPPFLAGS) -I$(X11INC) -L$(X11LIB) -lX11 -lXrender -L. -lschrift -lm
