@@ -1,13 +1,15 @@
 const builtin = @import("builtin");
 const std = @import("std");
 
+pub const Float = f64;
+
 pub const TtfInfo = struct {
     unitsPerEm: u16,
     locaFormat: i16,
     numLongHmtx: u16,
 };
 
-const Point = struct { x: f64, y: f64 };
+const Point = struct { x: Float, y: Float };
 const Line = struct {
     beg: u16,
     end: u16,
@@ -41,8 +43,8 @@ const Outline = struct {
 };
 
 const Cell = struct {
-    area: f64,
-    cover: f64,
+    area: Float,
+    cover: Float,
 };
 const Raster = struct {
     cells: []Cell,
@@ -71,21 +73,21 @@ const ttf = struct {
 };
 
 pub const LMetrics = struct {
-    ascender: f64,
-    descender: f64,
-    lineGap: f64,
+    ascender: Float,
+    descender: Float,
+    lineGap: Float,
 };
-pub fn lmetrics(ttf_mem: []const u8, info: TtfInfo, yScale: f64) !LMetrics {
+pub fn lmetrics(ttf_mem: []const u8, info: TtfInfo, yScale: Float) !LMetrics {
     const hhea: usize = (try getTable(ttf_mem, "hhea")) orelse
         return error.TtfNoHheaTable;
     const hhea_limit = hhea + 10;
     if (hhea_limit > ttf_mem.len)
         return error.TtfBadHheaTable;
-    const factor = yScale / @intToFloat(f64, info.unitsPerEm);
+    const factor = yScale / @intToFloat(Float, info.unitsPerEm);
     return LMetrics{
-        .ascender = factor * @intToFloat(f64, std.mem.readIntBig(i16, ttf_mem[hhea + 4 ..][0..2])),
-        .descender = factor * @intToFloat(f64, std.mem.readIntBig(i16, ttf_mem[hhea + 6 ..][0..2])),
-        .lineGap = factor * @intToFloat(f64, std.mem.readIntBig(i16, ttf_mem[hhea + 8 ..][0..2])),
+        .ascender = factor * @intToFloat(Float, std.mem.readIntBig(i16, ttf_mem[hhea + 4 ..][0..2])),
+        .descender = factor * @intToFloat(Float, std.mem.readIntBig(i16, ttf_mem[hhea + 6 ..][0..2])),
+        .lineGap = factor * @intToFloat(Float, std.mem.readIntBig(i16, ttf_mem[hhea + 8 ..][0..2])),
     };
 }
 
@@ -95,10 +97,13 @@ pub fn XY(comptime T: type) type {
         y: T,
     };
 }
+
+// TODO: document these fields
 pub const GMetrics = struct {
-    advanceWidth: f64,
-    leftSideBearing: f64,
+    advanceWidth: Float,
+    leftSideBearing: Float,
     yOffset: i32,
+    // TODO: should this and minHeight be unsigned?
     minWidth: i32,
     minHeight: i32,
 };
@@ -106,15 +111,15 @@ pub fn gmetrics(
     ttf_mem: []const u8,
     info: TtfInfo,
     downward: bool,
-    scale: XY(f64),
-    offset: XY(f64),
+    scale: XY(Float),
+    offset: XY(Float),
     glyph: u32,
 ) !GMetrics {
     const hor = try horMetrics(ttf_mem, info, glyph);
-    const xScaleEm = scale.x / @intToFloat(f64, info.unitsPerEm);
+    const xScaleEm = scale.x / @intToFloat(Float, info.unitsPerEm);
 
-    const advanceWidth = @intToFloat(f64, hor.advance_width) * xScaleEm;
-    const leftSideBearing = @intToFloat(f64, hor.left_side_bearing) * xScaleEm + offset.x;
+    const advanceWidth = @intToFloat(Float, hor.advance_width) * xScaleEm;
+    const leftSideBearing = @intToFloat(Float, hor.left_side_bearing) * xScaleEm + offset.x;
 
     const outline = (try getOutlineOffset(ttf_mem, info, glyph)) orelse return GMetrics{
         .advanceWidth = advanceWidth,
@@ -142,8 +147,8 @@ pub fn render(
     ttf_mem: []const u8,
     info: TtfInfo,
     downward: bool,
-    scale: XY(f64),
-    offset: XY(f64),
+    scale: XY(Float),
+    offset: XY(Float),
     out_pixels: []u8,
     out_size: XY(i32),
     glyph: u32,
@@ -158,16 +163,16 @@ pub fn render(
     // Set up the transformation matrix such that
     // the transformed bounding boxes min corner lines
     // up with the (0, 0) point.
-    var transform: [6]f64 = undefined;
-    transform[0] = scale.x / @intToFloat(f64, info.unitsPerEm);
+    var transform: [6]Float = undefined;
+    transform[0] = scale.x / @intToFloat(Float, info.unitsPerEm);
     transform[1] = 0.0;
     transform[2] = 0.0;
     transform[4] = offset.x - bbox.x_min;
     if (downward) {
-        transform[3] = -scale.y / @intToFloat(f64, info.unitsPerEm);
+        transform[3] = -scale.y / @intToFloat(Float, info.unitsPerEm);
         transform[5] = bbox.y_max - offset.y;
     } else {
-        transform[3] = scale.y / @intToFloat(f64, info.unitsPerEm);
+        transform[3] = scale.y / @intToFloat(Float, info.unitsPerEm);
         transform[5] = offset.y - bbox.y_min;
     }
 
@@ -215,7 +220,7 @@ fn midpoint(a: Point, b: Point) Point {
 }
 
 // Applies an affine linear transformation matrix to a set of points.
-fn transformPoints(points: []Point, trf: *const [6]f64) void {
+fn transformPoints(points: []Point, trf: *const [6]Float) void {
     for (points) |*pt_ref| {
         const pt = pt_ref.*;
         pt_ref.* = .{
@@ -225,9 +230,9 @@ fn transformPoints(points: []Point, trf: *const [6]f64) void {
     }
 }
 
-extern "c" fn nextafter(x: f64, y: f64) f64;
+extern "c" fn nextafter(x: Float, y: Float) Float;
 
-fn clipPoints(points: []Point, width: f64, height: f64) void {
+fn clipPoints(points: []Point, width: Float, height: Float) void {
     for (points) |*pt| {
         if (pt.x < 0.0) {
             pt.x = 0.0;
@@ -495,12 +500,12 @@ fn horMetrics(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !HorMetrics {
 }
 
 const Bbox = struct {
-    x_min: f64,
-    x_max: f64,
-    y_min: f64,
-    y_max: f64,
+    x_min: Float,
+    x_max: Float,
+    y_min: Float,
+    y_max: Float,
 };
-fn getGlyphBbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f64), outline: usize) !Bbox {
+fn getGlyphBbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(Float), offset: XY(Float), outline: usize) !Bbox {
     if (outline + 10 > ttf_mem.len)
         return error.TtfBadOutline;
     const box = [4]i16{
@@ -511,13 +516,13 @@ fn getGlyphBbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(f64), offset: XY(f
     };
     if (box[2] <= box[0] or box[3] <= box[1])
         return error.TtfBadBbox;
-    const xScaleEm = scale.x / @intToFloat(f64, info.unitsPerEm);
-    const yScaleEm = scale.y / @intToFloat(f64, info.unitsPerEm);
+    const xScaleEm = scale.x / @intToFloat(Float, info.unitsPerEm);
+    const yScaleEm = scale.y / @intToFloat(Float, info.unitsPerEm);
     return Bbox{
-        .x_min = @floor(@intToFloat(f64, box[0]) * xScaleEm + offset.x),
-        .x_max = @ceil(@intToFloat(f64, box[2]) * xScaleEm + offset.x),
-        .y_min = @floor(@intToFloat(f64, box[1]) * yScaleEm + offset.y),
-        .y_max = @ceil(@intToFloat(f64, box[3]) * yScaleEm + offset.y),
+        .x_min = @floor(@intToFloat(Float, box[0]) * xScaleEm + offset.x),
+        .x_max = @ceil(@intToFloat(Float, box[2]) * xScaleEm + offset.x),
+        .y_min = @floor(@intToFloat(Float, box[1]) * yScaleEm + offset.y),
+        .y_max = @ceil(@intToFloat(Float, box[3]) * yScaleEm + offset.y),
     };
 }
 
@@ -612,7 +617,7 @@ fn simplePoints(
                 accum += readTtf(i16, ttf_mem[off..]);
                 off += 2;
             }
-            points[i].x = @intToFloat(f64, accum);
+            points[i].x = @intToFloat(Float, accum);
         }
     }
 
@@ -633,7 +638,7 @@ fn simplePoints(
                 accum += readTtf(i16, ttf_mem[off..]);
                 off += 2;
             }
-            points[i].y = @intToFloat(f64, accum);
+            points[i].y = @intToFloat(Float, accum);
         }
     }
 }
@@ -819,7 +824,7 @@ fn compoundOutline(
         return error.TtfOutlineTooRecursive;
     var offset = offset_start;
     while (true) {
-        var local = [_]f64{0} ** 6;
+        var local = [_]Float{0} ** 6;
         if (offset + 4 > ttf_mem.len)
             return error.TtfBadOutline;
         const flags = readTtf(u16, ttf_mem[offset + 0..]);
@@ -832,35 +837,35 @@ fn compoundOutline(
         if (0 != (flags & ttf.offsets_are_large)) {
             if (offset + 4 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[4] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 0..]));
-            local[5] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 2..]));
+            local[4] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0..]));
+            local[5] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2..]));
             offset += 4;
         } else {
             if (offset + 2 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[4] = @intToFloat(f64, @bitCast(i8, ttf_mem[offset + 0]));
-            local[5] = @intToFloat(f64, @bitCast(i8, ttf_mem[offset + 1]));
+            local[4] = @intToFloat(Float, @bitCast(i8, ttf_mem[offset + 0]));
+            local[5] = @intToFloat(Float, @bitCast(i8, ttf_mem[offset + 1]));
             offset += 2;
         }
         if (0 != (flags & ttf.got_a_single_scale)) {
             if (offset + 2 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(f64, readTtf(i16, ttf_mem[offset..])) / 16384.0;
+            local[0] = @intToFloat(Float, readTtf(i16, ttf_mem[offset..])) / 16384.0;
             local[3] = local[0];
             offset += 2;
         } else if (0 != (flags & ttf.got_an_x_and_y_scale)) {
             if (offset + 4 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
-            local[3] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
+            local[0] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
+            local[3] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
             offset += 4;
         } else if (0 != (flags & ttf.got_a_scale_matrix)) {
             if (offset + 8 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
-            local[1] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
-            local[2] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 4..])) / 16384.0;
-            local[3] = @intToFloat(f64, readTtf(i16, ttf_mem[offset + 6..])) / 16384.0;
+            local[0] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
+            local[1] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
+            local[2] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 4..])) / 16384.0;
+            local[3] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 6..])) / 16384.0;
             offset += 8;
         } else {
             local[0] = 1.0;
@@ -902,7 +907,7 @@ fn decodeOutline(
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
 fn isFlat(outline: Outline, curve: Curve) bool {
-    const maxArea2: f64 = 2.0;
+    const maxArea2: Float = 2.0;
     const a = outline.points.items.ptr[curve.beg];
     const b = outline.points.items.ptr[curve.ctrl];
     const cpoint = outline.points.items.ptr[curve.end];
@@ -950,15 +955,15 @@ fn tesselateCurve(allocator: std.mem.Allocator, curve_in: Curve, outline: *Outli
     }
 }
 
-fn sign(x: f64) i2 {
+fn sign(x: Float) i2 {
     if (x > 0) return 1;
     if (x < 0) return -1;
     return 0;
 }
-fn fastFloor(x: f64) c_int {
+fn fastFloor(x: Float) c_int {
     return @floatToInt(c_int, std.math.floor(x));
 }
-fn fastCeil(x: f64) c_int {
+fn fastCeil(x: Float) c_int {
     return @floatToInt(c_int, std.math.ceil(x));
 }
 
@@ -991,30 +996,30 @@ fn drawLine(buf: Raster, origin: Point, goal: Point) void {
     } else {
         if (dir.x > 0) {
             pixel.x = fastFloor(origin.x);
-            nextCrossing.x = (origin.x - @intToFloat(f64, pixel.x)) * crossingIncr.x;
+            nextCrossing.x = (origin.x - @intToFloat(Float, pixel.x)) * crossingIncr.x;
             nextCrossing.x = crossingIncr.x - nextCrossing.x;
             numSteps += fastCeil(goal.x) - fastFloor(origin.x) - 1;
         } else {
             pixel.x = fastCeil(origin.x) - 1;
-            nextCrossing.x = (origin.x - @intToFloat(f64, pixel.x)) * crossingIncr.x;
+            nextCrossing.x = (origin.x - @intToFloat(Float, pixel.x)) * crossingIncr.x;
             numSteps += fastCeil(origin.x) - fastFloor(goal.x) - 1;
         }
     }
 
     if (dir.y > 0) {
         pixel.y = fastFloor(origin.y);
-        nextCrossing.y = (origin.y - @intToFloat(f64, pixel.y)) * crossingIncr.y;
+        nextCrossing.y = (origin.y - @intToFloat(Float, pixel.y)) * crossingIncr.y;
         nextCrossing.y = crossingIncr.y - nextCrossing.y;
         numSteps += fastCeil(goal.y) - fastFloor(origin.y) - 1;
     } else {
         pixel.y = fastCeil(origin.y) - 1;
-        nextCrossing.y = (origin.y - @intToFloat(f64, pixel.y)) * crossingIncr.y;
+        nextCrossing.y = (origin.y - @intToFloat(Float, pixel.y)) * crossingIncr.y;
         numSteps += fastCeil(origin.y) - fastFloor(goal.y) - 1;
     }
 
     var nextDistance = std.math.min(nextCrossing.x, nextCrossing.y);
     const halfDeltaX = 0.5 * delta.x;
-    var prevDistance: f64 = 0.0;
+    var prevDistance: Float = 0.0;
     var step: c_int = 0;
     while (step < numSteps) : (step += 1) {
         var xAverage = origin.x + (prevDistance + nextDistance) * halfDeltaX;
@@ -1022,7 +1027,7 @@ fn drawLine(buf: Raster, origin: Point, goal: Point) void {
         const cptr = &buf.cells[@intCast(usize, pixel.y * buf.size.x + pixel.x)];
         var cell = cptr.*;
         cell.cover += yDifference;
-        xAverage -= @intToFloat(f64, pixel.x);
+        xAverage -= @intToFloat(Float, pixel.x);
         cell.area += (1.0 - xAverage) * yDifference;
         cptr.* = cell;
         prevDistance = nextDistance;
@@ -1039,7 +1044,7 @@ fn drawLine(buf: Raster, origin: Point, goal: Point) void {
     const cptr = &buf.cells[@intCast(usize, pixel.y * buf.size.x + pixel.x)];
     var cell = cptr.*;
     cell.cover += yDifference;
-    xAverage -= @intToFloat(f64, pixel.x);
+    xAverage -= @intToFloat(Float, pixel.x);
     cell.area += (1.0 - xAverage) * yDifference;
     cptr.* = cell;
 }
@@ -1056,7 +1061,7 @@ fn drawLines(outline: *Outline, buf: Raster) void {
 
 // Integrate the values in the buffer to arrive at the final grayscale image.
 fn postProcess(buf: Raster, image: [*]u8) void {
-    var accum: f64 = 0;
+    var accum: Float = 0;
     const num = @intCast(usize, buf.size.x) * @intCast(usize, buf.size.y);
     var i: usize = 0;
     while (i < num) : (i += 1) {
@@ -1072,15 +1077,15 @@ fn postProcess(buf: Raster, image: [*]u8) void {
 fn renderOutline(
     allocator: std.mem.Allocator,
     outl: *Outline,
-    transform: *const [6]f64,
+    transform: *const [6]Float,
     pixels: [*]u8,
     size: XY(i32),
 ) !void {
     transformPoints(outl.points.items.ptr[0..outl.points.items.len], transform);
     clipPoints(
         outl.points.items.ptr[0..outl.points.items.len],
-        @intToFloat(f64, size.x),
-        @intToFloat(f64, size.y),
+        @intToFloat(Float, size.x),
+        @intToFloat(Float, size.y),
     );
 
     {

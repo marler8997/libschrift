@@ -1,5 +1,6 @@
 const std = @import("std");
 const schrift = @import("schrift.zig");
+const Float = schrift.Float;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -11,8 +12,8 @@ pub fn main() !void {
     );
     const ttf_info = try schrift.getTtfInfo(ttf_mem);
 
-    const scale = schrift.XY(f64) { .x = 32.0, .y = 32.0 };
-    const offset = schrift.XY(f64) { .x = 0, .y = 0 };
+    const scale = schrift.XY(Float) { .x = 32.0, .y = 32.0 };
+    const offset = schrift.XY(Float) { .x = 0, .y = 0 };
 
     const lmetrics = try schrift.lmetrics(ttf_mem, ttf_info, scale.y);
     std.debug.assert(lmetrics.ascender >= 0);
