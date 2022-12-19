@@ -77,7 +77,7 @@ export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
     metrics.* = .{
         .ascender = m.ascender,
         .descender = m.descender,
-        .lineGap = m.lineGap,
+        .lineGap = m.line_gap,
     };
     return 0;
 }
@@ -105,11 +105,11 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
         @intCast(u32, glyph),
     ) catch return -1;
     metrics.* = .{
-        .advanceWidth = m.advanceWidth,
-        .leftSideBearing = m.leftSideBearing,
-        .yOffset = @intCast(c_int, m.yOffset),
-        .minWidth = @intCast(c_int, m.minWidth),
-        .minHeight = @intCast(c_int, m.minHeight),
+        .advanceWidth = m.advance_width,
+        .leftSideBearing = m.left_side_bearing,
+        .yOffset = @intCast(c_int, m.y_offset),
+        .minWidth = @intCast(c_int, m.min_width),
+        .minHeight = @intCast(c_int, m.min_height),
     };
     return 0;
 }

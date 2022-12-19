@@ -4,9 +4,9 @@ const std = @import("std");
 pub const Float = f64;
 
 pub const TtfInfo = struct {
-    unitsPerEm: u16,
-    locaFormat: i16,
-    numLongHmtx: u16,
+    units_per_em: u16,
+    loca_format: i16,
+    num_long_hmtx: u16,
 };
 
 const Point = struct { x: Float, y: Float };
@@ -75,19 +75,19 @@ const ttf = struct {
 pub const LMetrics = struct {
     ascender: Float,
     descender: Float,
-    lineGap: Float,
+    line_gap: Float,
 };
-pub fn lmetrics(ttf_mem: []const u8, info: TtfInfo, yScale: Float) !LMetrics {
+pub fn lmetrics(ttf_mem: []const u8, info: TtfInfo, y_scale: Float) !LMetrics {
     const hhea: usize = (try getTable(ttf_mem, "hhea")) orelse
         return error.TtfNoHheaTable;
     const hhea_limit = hhea + 10;
     if (hhea_limit > ttf_mem.len)
         return error.TtfBadHheaTable;
-    const factor = yScale / @intToFloat(Float, info.unitsPerEm);
+    const factor = y_scale / @intToFloat(Float, info.units_per_em);
     return LMetrics{
         .ascender = factor * @intToFloat(Float, std.mem.readIntBig(i16, ttf_mem[hhea + 4 ..][0..2])),
         .descender = factor * @intToFloat(Float, std.mem.readIntBig(i16, ttf_mem[hhea + 6 ..][0..2])),
-        .lineGap = factor * @intToFloat(Float, std.mem.readIntBig(i16, ttf_mem[hhea + 8 ..][0..2])),
+        .line_gap = factor * @intToFloat(Float, std.mem.readIntBig(i16, ttf_mem[hhea + 8 ..][0..2])),
     };
 }
 
@@ -100,12 +100,12 @@ pub fn XY(comptime T: type) type {
 
 // TODO: document these fields
 pub const GMetrics = struct {
-    advanceWidth: Float,
-    leftSideBearing: Float,
-    yOffset: i32,
-    // TODO: should this and minHeight be unsigned?
-    minWidth: i32,
-    minHeight: i32,
+    advance_width: Float,
+    left_side_bearing: Float,
+    y_offset: i32,
+    // TODO: should this and min_height be unsigned?
+    min_width: i32,
+    min_height: i32,
 };
 pub fn gmetrics(
     ttf_mem: []const u8,
@@ -116,17 +116,17 @@ pub fn gmetrics(
     glyph: u32,
 ) !GMetrics {
     const hor = try horMetrics(ttf_mem, info, glyph);
-    const xScaleEm = scale.x / @intToFloat(Float, info.unitsPerEm);
+    const x_scale_em = scale.x / @intToFloat(Float, info.units_per_em);
 
-    const advanceWidth = @intToFloat(Float, hor.advance_width) * xScaleEm;
-    const leftSideBearing = @intToFloat(Float, hor.left_side_bearing) * xScaleEm + offset.x;
+    const advance_width = @intToFloat(Float, hor.advance_width) * x_scale_em;
+    const left_side_bearing = @intToFloat(Float, hor.left_side_bearing) * x_scale_em + offset.x;
 
     const outline = (try getOutlineOffset(ttf_mem, info, glyph)) orelse return GMetrics{
-        .advanceWidth = advanceWidth,
-        .leftSideBearing = leftSideBearing,
-        .minWidth = 0,
-        .minHeight = 0,
-        .yOffset = 0,
+        .advance_width = advance_width,
+        .left_side_bearing = left_side_bearing,
+        .min_width = 0,
+        .min_height = 0,
+        .y_offset = 0,
     };
     const bbox = try getGlyphBbox(ttf_mem, info, scale, offset, outline);
     //std.debug.assert(bbox.x_min < bbox.x_max);
@@ -134,11 +134,11 @@ pub fn gmetrics(
     const y_min = @floatToInt(i32, bbox.y_min);
     const y_max = @floatToInt(i32, bbox.y_max);
     return GMetrics{
-        .advanceWidth = advanceWidth,
-        .leftSideBearing = leftSideBearing,
-        .minWidth = @floatToInt(i32, bbox.x_max) - @floatToInt(i32, bbox.x_min) + 1,
-        .minHeight = y_max - y_min + 1,
-        .yOffset = if (downward) -y_max else y_min,
+        .advance_width = advance_width,
+        .left_side_bearing = left_side_bearing,
+        .min_width = @floatToInt(i32, bbox.x_max) - @floatToInt(i32, bbox.x_min) + 1,
+        .min_height = y_max - y_min + 1,
+        .y_offset = if (downward) -y_max else y_min,
     };
 }
 
@@ -164,15 +164,15 @@ pub fn render(
     // the transformed bounding boxes min corner lines
     // up with the (0, 0) point.
     var transform: [6]Float = undefined;
-    transform[0] = scale.x / @intToFloat(Float, info.unitsPerEm);
+    transform[0] = scale.x / @intToFloat(Float, info.units_per_em);
     transform[1] = 0.0;
     transform[2] = 0.0;
     transform[4] = offset.x - bbox.x_min;
     if (downward) {
-        transform[3] = -scale.y / @intToFloat(Float, info.unitsPerEm);
+        transform[3] = -scale.y / @intToFloat(Float, info.units_per_em);
         transform[5] = bbox.y_max - offset.y;
     } else {
-        transform[3] = scale.y / @intToFloat(Float, info.unitsPerEm);
+        transform[3] = scale.y / @intToFloat(Float, info.units_per_em);
         transform[5] = offset.y - bbox.y_min;
     }
 
@@ -191,9 +191,9 @@ fn readTtf(comptime T: type, ttf_mem: []const u8) T {
 pub fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
     if (ttf_mem.len < 12) return error.TtfTooSmall;
 
-    // Check for a compatible scalerType (magic number).
-    const scalerType = readTtf(u32, ttf_mem);
-    if (scalerType != ttf.file_magic_one and scalerType != ttf.file_magic_two)
+    // Check for a compatible scaler_type (magic number).
+    const scaler_type = readTtf(u32, ttf_mem);
+    if (scaler_type != ttf.file_magic_one and scaler_type != ttf.file_magic_two)
         return error.TtfBadMagic;
     const head: usize = (try getTable(ttf_mem, "head")) orelse
         return error.TtfNoHeadTable;
@@ -206,9 +206,9 @@ pub fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
     if (hhea_limit > ttf_mem.len)
         return error.TtfBadHheaTable;
     return TtfInfo{
-        .unitsPerEm = readTtf(u16, ttf_mem[head + 18 ..]),
-        .numLongHmtx = readTtf(u16, ttf_mem[hhea + 34 ..]),
-        .locaFormat = readTtf(i16, ttf_mem[head + 50 ..]),
+        .units_per_em = readTtf(u16, ttf_mem[head + 18 ..]),
+        .num_long_hmtx = readTtf(u16, ttf_mem[hhea + 34 ..]),
+        .loca_format = readTtf(i16, ttf_mem[head + 50 ..]),
     };
 }
 
@@ -331,98 +331,98 @@ fn cmpu32(a: [*]const u8, b: [*]const u8) i2 {
 
 fn getTable(ttf_mem: []const u8, tag: *const [4]u8) !?u32 {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
-    const numTables = readTtf(u16, ttf_mem[4..]);
-    const limit = 12 + @intCast(usize, numTables) * 16;
+    const num_tables = readTtf(u16, ttf_mem[4..]);
+    const limit = 12 + @intCast(usize, num_tables) * 16;
     if (limit > ttf_mem.len)
         return error.TtfBadTables;
-    const match_ptr = bsearch(tag, ttf_mem.ptr + 12, numTables, 16, cmpu32) orelse return null;
+    const match_ptr = bsearch(tag, ttf_mem.ptr + 12, num_tables, 16, cmpu32) orelse return null;
     const match_offset = @ptrToInt(match_ptr) - @ptrToInt(ttf_mem.ptr);
     return readTtf(u32, ttf_mem[match_offset + 8 ..]);
 }
 
-fn cmapFmt4(ttf_mem: []const u8, table: usize, charCode: u32) !u32 {
+fn cmapFmt4(ttf_mem: []const u8, table: usize, char_code: u32) !u32 {
     // cmap format 4 only supports the Unicode BMP.
-    if (charCode > 0xFFFF)
+    if (char_code > 0xFFFF)
         return 0;
 
     if (table + 8 > ttf_mem.len)
         return error.TtfBadCmapTable;
-    const segCountX2 = readTtf(u16, ttf_mem[table..]);
-    if (((segCountX2 & 1) != 0) or (0 == segCountX2))
+    const seg_count_x2 = readTtf(u16, ttf_mem[table..]);
+    if (((seg_count_x2 & 1) != 0) or (0 == seg_count_x2))
         return error.TtfBadCmapTable;
 
     // Find starting positions of the relevant arrays.
-    const endCodes = table + 8;
-    const startCodes = endCodes + segCountX2 + 2;
-    const idDeltas = startCodes + segCountX2;
-    const idRangeOffsets = idDeltas + segCountX2;
-    if (idRangeOffsets + segCountX2 > ttf_mem.len)
+    const end_codes = table + 8;
+    const start_codes = end_codes + seg_count_x2 + 2;
+    const id_deltas = start_codes + seg_count_x2;
+    const id_range_offsets = id_deltas + seg_count_x2;
+    if (id_range_offsets + seg_count_x2 > ttf_mem.len)
         return error.TtfBadCmapTable;
 
     // Find the segment that contains shortCode by binary searching over
     // the highest codes in the segments.
     const key = [2]u8{
-        @intCast(u8, (charCode >> 8) & 0xff),
-        @intCast(u8, (charCode >> 0) & 0xff),
+        @intCast(u8, (char_code >> 8) & 0xff),
+        @intCast(u8, (char_code >> 0) & 0xff),
     };
-    const segAddr = @ptrToInt(csearch(&key, ttf_mem.ptr + endCodes, segCountX2 / 2, 2, cmpu16));
-    const segIdxX2 = segAddr - (@ptrToInt(ttf_mem.ptr) + endCodes);
+    const seg_addr = @ptrToInt(csearch(&key, ttf_mem.ptr + end_codes, seg_count_x2 / 2, 2, cmpu16));
+    const seg_idx_x2 = seg_addr - (@ptrToInt(ttf_mem.ptr) + end_codes);
     // Look up segment info from the arrays & short circuit if the spec requires.
-    const startCode = readTtf(u16, ttf_mem[startCodes + segIdxX2 ..]);
-    if (startCode > charCode)
+    const start_code = readTtf(u16, ttf_mem[start_codes + seg_idx_x2 ..]);
+    if (start_code > char_code)
         return 0;
-    const idDelta: u32 = readTtf(u16, ttf_mem[idDeltas + segIdxX2 ..]);
-    const idRangeOffset = readTtf(u16, ttf_mem[idRangeOffsets + segIdxX2 ..]);
-    if (idRangeOffset == 0) {
+    const id_delta: u32 = readTtf(u16, ttf_mem[id_deltas + seg_idx_x2 ..]);
+    const id_range_offset = readTtf(u16, ttf_mem[id_range_offsets + seg_idx_x2 ..]);
+    if (id_range_offset == 0) {
         // Intentional integer under- and overflow.
         // TODO: not sure if this is correct?
-        return (charCode + idDelta) & 0xFFFF;
+        return (char_code + id_delta) & 0xFFFF;
     }
     // Calculate offset into glyph array and determine ultimate value.
-    const idOffset = idRangeOffsets + segIdxX2 + idRangeOffset + 2 * (charCode - startCode);
-    if (idOffset + 2 > ttf_mem.len)
+    const id_offset = id_range_offsets + seg_idx_x2 + id_range_offset + 2 * (char_code - start_code);
+    if (id_offset + 2 > ttf_mem.len)
         return error.TtfBadCmapTable;
-    const id: u32 = readTtf(u16, ttf_mem[idOffset..]);
+    const id: u32 = readTtf(u16, ttf_mem[id_offset..]);
     // Intentional integer under- and overflow.
-    return if (id == 0) 0 else ((id + idDelta) & 0xFFFF);
+    return if (id == 0) 0 else ((id + id_delta) & 0xFFFF);
 }
 
-fn cmapFmt12_13(table: []const u8, charCode: u32, which: c_int) !u32 {
+fn cmapFmt12_13(table: []const u8, char_code: u32, which: c_int) !u32 {
     if (table.len < 16)
         return error.TtfBadCmapTable;
-    const numEntries = @intCast(usize, readTtf(u32, table[12..]));
-    if (16 + 12 * numEntries > table.len)
+    const num_entries = @intCast(usize, readTtf(u32, table[12..]));
+    if (16 + 12 * num_entries > table.len)
         return error.TtfBadCmapTable;
     var i: usize = 0;
-    while (i < numEntries) : (i += 1) {
+    while (i < num_entries) : (i += 1) {
         const entry = 16 + i * 12;
-        const firstCode = readTtf(u32, table[entry + 0 ..]);
-        const lastCode = readTtf(u32, table[entry + 4 ..]);
-        if (charCode < firstCode or charCode > lastCode)
+        const first_code = readTtf(u32, table[entry + 0 ..]);
+        const last_code = readTtf(u32, table[entry + 4 ..]);
+        if (char_code < first_code or char_code > last_code)
             continue;
-        const glyphOffset = readTtf(u32, table[entry + 8 ..]);
-        return if (which == 12) (charCode - firstCode) + glyphOffset else glyphOffset;
+        const glyph_offset = readTtf(u32, table[entry + 8 ..]);
+        return if (which == 12) (char_code - first_code) + glyph_offset else glyph_offset;
     }
     return 0;
 }
 
 // Maps Unicode code points to glyph indices.
-pub fn lookupGlyph(ttf_mem: []const u8, charCode: u32) !u32 {
+pub fn lookupGlyph(ttf_mem: []const u8, char_code: u32) !u32 {
     const cmap: usize = (try getTable(ttf_mem, "cmap")) orelse
         return error.TtfNoCmapTable;
     const cmap_limit = cmap + 4;
     if (cmap_limit > ttf_mem.len)
         return error.TtfBadCmapTable;
-    const numEntries: usize = readTtf(u16, ttf_mem[cmap + 2 ..]);
+    const num_entries: usize = readTtf(u16, ttf_mem[cmap + 2 ..]);
 
-    const entries_limit = 4 + numEntries * 8;
+    const entries_limit = 4 + num_entries * 8;
     if (entries_limit > ttf_mem.len)
         return error.TtfBadCmapTable;
 
     // First look for a 'full repertoire'/non-BMP map.
     {
         var idx: usize = 0;
-        while (idx < numEntries) : (idx += 1) {
+        while (idx < num_entries) : (idx += 1) {
             const entry = cmap + 4 + idx * 8;
             const etype = readTtf(u16, ttf_mem[entry..]) * 0o100 + readTtf(u16, ttf_mem[entry + 2 ..]);
             // Complete unicode map
@@ -431,7 +431,7 @@ pub fn lookupGlyph(ttf_mem: []const u8, charCode: u32) !u32 {
                 if (table + 2 > ttf_mem.len)
                     return error.TtfBadCmapTable;
                 switch (readTtf(u16, ttf_mem[table..])) {
-                    12 => return cmapFmt12_13(ttf_mem[table..], charCode, 12),
+                    12 => return cmapFmt12_13(ttf_mem[table..], char_code, 12),
                     else => return error.TtfUnsupportedCmapFormat,
                 }
             }
@@ -441,7 +441,7 @@ pub fn lookupGlyph(ttf_mem: []const u8, charCode: u32) !u32 {
     // If no 'full repertoire' cmap was found, try looking for a BMP map.
     {
         var idx: usize = 0;
-        while (idx < numEntries) : (idx += 1) {
+        while (idx < num_entries) : (idx += 1) {
             const entry = cmap + 4 + idx * 8;
             const etype = readTtf(u16, ttf_mem[entry..]) * 0o100 + readTtf(u16, ttf_mem[entry + 2 ..]);
             // Unicode BMP
@@ -451,8 +451,8 @@ pub fn lookupGlyph(ttf_mem: []const u8, charCode: u32) !u32 {
                     return error.TtfBadCmapTable;
                 // Dispatch based on cmap format.
                 switch (readTtf(u16, ttf_mem[table..])) {
-                    4 => return cmapFmt4(ttf_mem, table + 6, charCode),
-                    //6 => return cmap_fmt6(font, table + 6, charCode, glyph),
+                    4 => return cmapFmt4(ttf_mem, table + 6, char_code),
+                    //6 => return cmap_fmt6(font, table + 6, char_code, glyph),
                     6 => @panic("todo"),
                     else => return error.TtfUnsupportedCmapFormat,
                 }
@@ -471,7 +471,7 @@ fn horMetrics(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !HorMetrics {
     const hmtx: usize = (try getTable(ttf_mem, "hmtx")) orelse
         return error.TtfNoHmtxTable;
 
-    if (glyph < info.numLongHmtx) {
+    if (glyph < info.num_long_hmtx) {
         // glyph is inside long metrics segment.
         const offset = hmtx + 4 * glyph;
         if (offset + 4 > ttf_mem.len)
@@ -483,14 +483,14 @@ fn horMetrics(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !HorMetrics {
     }
 
     // glyph is inside short metrics segment.
-    const boundary = hmtx + 4 * @intCast(usize, info.numLongHmtx);
+    const boundary = hmtx + 4 * @intCast(usize, info.num_long_hmtx);
     if (boundary < 4)
         return error.TtfBadHmtxTable;
 
     const width_offset = boundary - 4;
     if (width_offset + 2 > ttf_mem.len)
         return error.TtfBadHmtxTable;
-    const bearing_offset = boundary + 2 * @intCast(usize, glyph - info.numLongHmtx);
+    const bearing_offset = boundary + 2 * @intCast(usize, glyph - info.num_long_hmtx);
     if (bearing_offset + 2 > ttf_mem.len)
         return error.TtfBadHmtxTable;
     return .{
@@ -516,13 +516,13 @@ fn getGlyphBbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(Float), offset: XY
     };
     if (box[2] <= box[0] or box[3] <= box[1])
         return error.TtfBadBbox;
-    const xScaleEm = scale.x / @intToFloat(Float, info.unitsPerEm);
-    const yScaleEm = scale.y / @intToFloat(Float, info.unitsPerEm);
+    const x_scale_em = scale.x / @intToFloat(Float, info.units_per_em);
+    const y_scale_em = scale.y / @intToFloat(Float, info.units_per_em);
     return Bbox{
-        .x_min = @floor(@intToFloat(Float, box[0]) * xScaleEm + offset.x),
-        .x_max = @ceil(@intToFloat(Float, box[2]) * xScaleEm + offset.x),
-        .y_min = @floor(@intToFloat(Float, box[1]) * yScaleEm + offset.y),
-        .y_max = @ceil(@intToFloat(Float, box[3]) * yScaleEm + offset.y),
+        .x_min = @floor(@intToFloat(Float, box[0]) * x_scale_em + offset.x),
+        .x_max = @ceil(@intToFloat(Float, box[2]) * x_scale_em + offset.x),
+        .y_min = @floor(@intToFloat(Float, box[1]) * y_scale_em + offset.y),
+        .y_max = @ceil(@intToFloat(Float, box[3]) * y_scale_em + offset.y),
     };
 }
 
@@ -534,7 +534,7 @@ fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !?usize {
         return error.TtfNoGlyfTable;
 
     const entry = blk: {
-        if (info.locaFormat == 0) {
+        if (info.loca_format == 0) {
             const base = loca + 2 * glyph;
             if (base + 4 > ttf_mem.len)
                 return error.TtfBadLocaTable;
@@ -556,12 +556,12 @@ fn getOutlineOffset(ttf_mem: []const u8, info: TtfInfo, glyph: u32) !?usize {
 }
 
 // For a 'simple' outline, determines each point of the outline with a set of flags.
-fn simpleFlags(ttf_mem: []const u8, offset: usize, numPts: u16, flags: []u8) !usize {
+fn simpleFlags(ttf_mem: []const u8, offset: usize, num_pts: u16, flags: []u8) !usize {
     var off = offset;
     var repeat: u8 = 0;
     var value: u8 = 0;
     var point_index: u16 = 0;
-    while (point_index < numPts) : (point_index += 1) {
+    while (point_index < num_pts) : (point_index += 1) {
         if (repeat != 0) {
             repeat -= 1;
         } else {
@@ -594,7 +594,7 @@ fn resolveSign(comptime T: type, is_pos: bool, value: T) T {
 fn simplePoints(
     ttf_mem: []const u8,
     offset: usize,
-    numPts: u16,
+    num_pts: u16,
     flags: []const u8,
     points: []Point,
 ) !void {
@@ -603,7 +603,7 @@ fn simplePoints(
     {
         var accum: Accum = 0;
         var i: u16 = 0;
-        while (i < numPts) : (i += 1) {
+        while (i < num_pts) : (i += 1) {
             if ((flags[i] & ttf.x_change_is_small) != 0) {
                 if (off + 1 > ttf_mem.len)
                     return error.TtfBadOutline;
@@ -624,7 +624,7 @@ fn simplePoints(
     {
         var accum: Accum = 0;
         var i: u16 = 0;
-        while (i < numPts) : (i += 1) {
+        while (i < num_pts) : (i += 1) {
             if ((flags[i] & ttf.y_change_is_small) != 0) {
                 if (off + 1 > ttf_mem.len)
                     return error.TtfBadOutline;
@@ -652,41 +652,41 @@ fn add(comptime T: type, a: T, b: T) ?T {
 fn decodeContour(
     allocator: std.mem.Allocator,
     flags_start: []const u8,
-    basePointStart: u16,
+    base_point_start: u16,
     count_start: u16,
     outl: *Outline,
 ) !void {
     // Skip contours with less than two points, since the following algorithm can't handle them and
     // they should appear invisible either way (because they don't have any area).
     if (count_start < 2) return;
-    std.debug.assert(basePointStart <= std.math.maxInt(u16) - count_start);
+    std.debug.assert(base_point_start <= std.math.maxInt(u16) - count_start);
 
     var flags = flags_start;
-    var basePoint = basePointStart;
+    var base_point = base_point_start;
     var count = count_start;
-    const looseEnd: u16 = blk: {
+    const loose_end: u16 = blk: {
         if (0 != (flags[0] & ttf.point_is_on_curve)) {
-            basePoint += 1;
+            base_point += 1;
             flags = flags[1..];
             count -= 1;
-            break :blk basePoint - 1;
+            break :blk base_point - 1;
         }
         if (0 != (flags[count - 1] & ttf.point_is_on_curve)) {
             count -= 1;
-            break :blk add(u16, basePoint, count) orelse return error.TtfTooManyPoints;
+            break :blk add(u16, base_point, count) orelse return error.TtfTooManyPoints;
         }
 
-        const looseEnd = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
-        const new_point = midpoint(outl.points.items[basePoint], outl.points.items[basePoint + count - 1]);
+        const loose_end = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
+        const new_point = midpoint(outl.points.items[base_point], outl.points.items[base_point + count - 1]);
         try outl.appendPoint(allocator, new_point);
-        break :blk looseEnd;
+        break :blk loose_end;
     };
-    var beg = looseEnd;
+    var beg = loose_end;
     var opt_ctrl: ?u16 = null;
     var i: u16 = 0;
     while (i < count) : (i += 1) {
-        // cur can't overflow because we ensure that basePoint + count < 0xFFFF before calling decodeContour().
-        const cur = add(u16, basePoint, i) orelse return error.TtfTooManyPoints;
+        // cur can't overflow because we ensure that base_point + count < 0xFFFF before calling decodeContour().
+        const cur = add(u16, base_point, i) orelse return error.TtfTooManyPoints;
         if (0 != (flags[i] & ttf.point_is_on_curve)) {
             if (opt_ctrl) |ctrl| {
                 try outl.appendCurve(allocator, .{ .beg = beg, .end = cur, .ctrl = ctrl });
@@ -707,9 +707,9 @@ fn decodeContour(
         }
     }
     if (opt_ctrl) |ctrl| {
-        try outl.appendCurve(allocator, .{ .beg = beg, .end = looseEnd, .ctrl = ctrl });
+        try outl.appendCurve(allocator, .{ .beg = beg, .end = loose_end, .ctrl = ctrl });
     } else {
-        try outl.appendLine(allocator, .{ .beg = beg, .end = looseEnd });
+        try outl.appendLine(allocator, .{ .beg = beg, .end = loose_end });
     }
 }
 
@@ -734,79 +734,79 @@ fn simpleOutline(
     allocator: std.mem.Allocator,
     ttf_mem: []const u8,
     offset_start: usize,
-    numContours: u15,
+    num_contours: u15,
     outl: *Outline,
 ) !void {
-    std.debug.assert(numContours > 0);
-    const basePoint = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
+    std.debug.assert(num_contours > 0);
+    const base_point = std.math.cast(u16, outl.points.items.len) orelse return error.TtfTooManyPoints;
 
-    const limit = offset_start + numContours * 2 + 2;
+    const limit = offset_start + num_contours * 2 + 2;
     if (limit > ttf_mem.len)
         return error.TtfBadOutline;
-    const numPts = blk: {
-        var num = readTtf(u16, ttf_mem[offset_start + (numContours - 1) * 2..]);
+    const num_pts = blk: {
+        var num = readTtf(u16, ttf_mem[offset_start + (num_contours - 1) * 2..]);
         break :blk add(u16, num, 1) orelse return error.TtfBadOutline;
     };
-    if (outl.points.items.len + @intCast(usize, numPts) > std.math.maxInt(u16))
+    if (outl.points.items.len + @intCast(usize, num_pts) > std.math.maxInt(u16))
         return error.TtfBadOutline;
-    const new_points_len = add(u16, basePoint, numPts) orelse return error.TtfTooManyPoints;
+    const new_points_len = add(u16, base_point, num_pts) orelse return error.TtfTooManyPoints;
     try outl.points.ensureTotalCapacity(allocator, new_points_len);
 
     // TODO: the following commented line should work but the zig compiler
     //       isn't optimizing it correctly which causes *extreme* slowdown
-    //var endPtsStackBuf = stackBuf(u16, 16);
+    //var end_pts_stack_buf = stackBuf(u16, 16);
     const PtsBuf = StackBuf(u16, 16);
-    var endPtsStackBuf: PtsBuf = undefined;
-    const endPts = try endPtsStackBuf.alloc(allocator, numContours);
-    defer PtsBuf.free(allocator, endPts);
+    var end_pts_stack_buf: PtsBuf = undefined;
+    const end_pts = try end_pts_stack_buf.alloc(allocator, num_contours);
+    defer PtsBuf.free(allocator, end_pts);
 
     // TODO: the following commented line should work but the zig compiler
     //       isn't optimizing it correctly which causes *extreme* slowdown
-    //var flagsStackBuf = stackBuf(u8, 128);
+    //var flags_stack_buf = stackBuf(u8, 128);
     const FlagsBuf = StackBuf(u8, 128);
-    var flagsStackBuf: FlagsBuf = undefined;
-    const flags = try flagsStackBuf.alloc(allocator, numPts);
+    var flags_stack_buf: FlagsBuf = undefined;
+    const flags = try flags_stack_buf.alloc(allocator, num_pts);
     defer FlagsBuf.free(allocator, flags);
 
     var offset = offset_start;
     {
         var i: c_uint = 0;
-        while (i < numContours) : (i += 1) {
-            endPts[i] = readTtf(u16, ttf_mem[offset..]);
+        while (i < num_contours) : (i += 1) {
+            end_pts[i] = readTtf(u16, ttf_mem[offset..]);
             offset += 2;
         }
     }
 
-    // Ensure that endPts are never falling.
-    // Falling endPts have no sensible interpretation and most likely only occur in malicious input.
+    // Ensure that end_pts are never falling.
+    // Falling end_pts have no sensible interpretation and most likely only occur in malicious input.
     // Therefore, we bail, should we ever encounter such input.
     {
-        var i: @TypeOf(numContours) = 0;
-        while (i < numContours - 1) : (i += 1) {
-            const prev_limit = add(u16, endPts[i], 1) orelse return error.TtfBadOutline;
-            if (endPts[i + 1] < prev_limit)
+        var i: @TypeOf(num_contours) = 0;
+        while (i < num_contours - 1) : (i += 1) {
+            const prev_limit = add(u16, end_pts[i], 1) orelse return error.TtfBadOutline;
+            if (end_pts[i + 1] < prev_limit)
                 return error.TtfBadOutline;
         }
     }
     offset += 2 + @as(usize, readTtf(u16, ttf_mem[offset..]));
 
-    offset = try simpleFlags(ttf_mem, offset, numPts, flags);
+    offset = try simpleFlags(ttf_mem, offset, num_pts, flags);
     outl.points.items.len = new_points_len;
-    try simplePoints(ttf_mem, offset, numPts, flags, outl.points.items[basePoint..]);
+    try simplePoints(ttf_mem, offset, num_pts, flags, outl.points.items[base_point..]);
 
     var beg: u16 = 0;
     {
-        var i: @TypeOf(numContours) = 0;
-        while (i < numContours) : (i += 1) {
-            const count = std.math.cast(u16, endPts[i] - beg + 1) orelse return error.TtfBadOutline;
+        var i: @TypeOf(num_contours) = 0;
+        while (i < num_contours) : (i += 1) {
+            const count = std.math.cast(u16, end_pts[i] - beg + 1) orelse return error.TtfBadOutline;
             try decodeContour(
                 allocator,
                 flags[beg..],
-                add(u16, basePoint, beg) orelse return error.TtfTooManyPoints,
+                add(u16, base_point, beg) orelse return error.TtfTooManyPoints,
                 count,
                 outl,
             );
-            beg = endPts[i] + 1;
+            beg = end_pts[i] + 1;
         }
     }
 }
@@ -816,11 +816,11 @@ fn compoundOutline(
     ttf_mem: []const u8,
     info: TtfInfo,
     offset_start: usize,
-    recDepth: u8,
+    rec_depth: u8,
     outl: *Outline,
 ) !void {
     // Guard against infinite recursion (compound glyphs that have themselves as component).
-    if (recDepth >= 4)
+    if (rec_depth >= 4)
         return error.TtfOutlineTooRecursive;
     var offset = offset_start;
     while (true) {
@@ -876,9 +876,9 @@ fn compoundOutline(
         // Furthermore, Microsoft's spec doesn't even mention anything like this.
         // It's almost as if nobody ever uses this feature anyway.
         if (try getOutlineOffset(ttf_mem, info, glyph)) |outline| {
-            const basePoint = outl.points.items.len;
-            try decodeOutline(allocator, ttf_mem, info, outline, recDepth + 1, outl);
-            transformPoints(outl.points.items.ptr[basePoint..outl.points.items.len], &local);
+            const base_point = outl.points.items.len;
+            try decodeOutline(allocator, ttf_mem, info, outline, rec_depth + 1, outl);
+            transformPoints(outl.points.items.ptr[base_point..outl.points.items.len], &local);
         }
 
         if (0 == (flags & ttf.there_are_more_components)) break;
@@ -890,31 +890,31 @@ fn decodeOutline(
     ttf_mem: []const u8,
     info: TtfInfo,
     offset: usize,
-    recDepth: u8,
+    rec_depth: u8,
     outl: *Outline,
 ) !void {
     if (offset + 10 > ttf_mem.len)
         return error.TtfBadOutline;
-    const numContours = readTtf(i16, ttf_mem[offset..]);
-    if (numContours > 0) {
+    const num_contours = readTtf(i16, ttf_mem[offset..]);
+    if (num_contours > 0) {
         // Glyph has a 'simple' outline consisting of a number of contours.
-        return simpleOutline(allocator, ttf_mem, offset + 10, @intCast(u15, numContours), outl);
-    } else if (numContours < 0) {
+        return simpleOutline(allocator, ttf_mem, offset + 10, @intCast(u15, num_contours), outl);
+    } else if (num_contours < 0) {
         // Glyph has a compound outline combined from mutiple other outlines.
-        return compoundOutline(allocator, ttf_mem, info, offset + 10, recDepth, outl);
+        return compoundOutline(allocator, ttf_mem, info, offset + 10, rec_depth, outl);
     }
 }
 
 // A heuristic to tell whether a given curve can be approximated closely enough by a line.
 fn isFlat(outline: Outline, curve: Curve) bool {
-    const maxArea2: Float = 2.0;
+    const max_area2: Float = 2.0;
     const a = outline.points.items.ptr[curve.beg];
     const b = outline.points.items.ptr[curve.ctrl];
     const cpoint = outline.points.items.ptr[curve.end];
     const g = Point{ .x = b.x - a.x, .y = b.y - a.y };
     const h = Point{ .x = cpoint.x - a.x, .y = cpoint.y - a.y };
     const area2 = std.math.fabs(g.x * h.y - h.x * g.y);
-    return area2 <= maxArea2;
+    return area2 <= max_area2;
 }
 
 fn tesselateCurve(allocator: std.mem.Allocator, curve_in: Curve, outline: *Outline) !void {
@@ -987,65 +987,64 @@ fn drawLine(buf: Raster, origin: Point, goal: Point) void {
     };
 
     var pixel: struct { x: i32, y: i32 } = undefined;
-    //struct { int x, y; } pixel;
-    var nextCrossing: Point = undefined;
-    var numSteps: c_int = 0;
+    var next_crossing: Point = undefined;
+    var num_steps: c_int = 0;
     if (dir.x == 0) {
         pixel.x = fastFloor(origin.x);
-        nextCrossing.x = 100.0;
+        next_crossing.x = 100.0;
     } else {
         if (dir.x > 0) {
             pixel.x = fastFloor(origin.x);
-            nextCrossing.x = (origin.x - @intToFloat(Float, pixel.x)) * crossingIncr.x;
-            nextCrossing.x = crossingIncr.x - nextCrossing.x;
-            numSteps += fastCeil(goal.x) - fastFloor(origin.x) - 1;
+            next_crossing.x = (origin.x - @intToFloat(Float, pixel.x)) * crossingIncr.x;
+            next_crossing.x = crossingIncr.x - next_crossing.x;
+            num_steps += fastCeil(goal.x) - fastFloor(origin.x) - 1;
         } else {
             pixel.x = fastCeil(origin.x) - 1;
-            nextCrossing.x = (origin.x - @intToFloat(Float, pixel.x)) * crossingIncr.x;
-            numSteps += fastCeil(origin.x) - fastFloor(goal.x) - 1;
+            next_crossing.x = (origin.x - @intToFloat(Float, pixel.x)) * crossingIncr.x;
+            num_steps += fastCeil(origin.x) - fastFloor(goal.x) - 1;
         }
     }
 
     if (dir.y > 0) {
         pixel.y = fastFloor(origin.y);
-        nextCrossing.y = (origin.y - @intToFloat(Float, pixel.y)) * crossingIncr.y;
-        nextCrossing.y = crossingIncr.y - nextCrossing.y;
-        numSteps += fastCeil(goal.y) - fastFloor(origin.y) - 1;
+        next_crossing.y = (origin.y - @intToFloat(Float, pixel.y)) * crossingIncr.y;
+        next_crossing.y = crossingIncr.y - next_crossing.y;
+        num_steps += fastCeil(goal.y) - fastFloor(origin.y) - 1;
     } else {
         pixel.y = fastCeil(origin.y) - 1;
-        nextCrossing.y = (origin.y - @intToFloat(Float, pixel.y)) * crossingIncr.y;
-        numSteps += fastCeil(origin.y) - fastFloor(goal.y) - 1;
+        next_crossing.y = (origin.y - @intToFloat(Float, pixel.y)) * crossingIncr.y;
+        num_steps += fastCeil(origin.y) - fastFloor(goal.y) - 1;
     }
 
-    var nextDistance = std.math.min(nextCrossing.x, nextCrossing.y);
-    const halfDeltaX = 0.5 * delta.x;
-    var prevDistance: Float = 0.0;
+    var next_distance = std.math.min(next_crossing.x, next_crossing.y);
+    const half_delta_x = 0.5 * delta.x;
+    var prev_distance: Float = 0.0;
     var step: c_int = 0;
-    while (step < numSteps) : (step += 1) {
-        var xAverage = origin.x + (prevDistance + nextDistance) * halfDeltaX;
-        const yDifference = (nextDistance - prevDistance) * delta.y;
+    while (step < num_steps) : (step += 1) {
+        var x_average = origin.x + (prev_distance + next_distance) * half_delta_x;
+        const y_difference = (next_distance - prev_distance) * delta.y;
         const cptr = &buf.cells[@intCast(usize, pixel.y * buf.size.x + pixel.x)];
         var cell = cptr.*;
-        cell.cover += yDifference;
-        xAverage -= @intToFloat(Float, pixel.x);
-        cell.area += (1.0 - xAverage) * yDifference;
+        cell.cover += y_difference;
+        x_average -= @intToFloat(Float, pixel.x);
+        cell.area += (1.0 - x_average) * y_difference;
         cptr.* = cell;
-        prevDistance = nextDistance;
-        const alongX = nextCrossing.x < nextCrossing.y;
-        pixel.x += if (alongX) dir.x else 0;
-        pixel.y += if (alongX) 0 else dir.y;
-        nextCrossing.x += if (alongX) crossingIncr.x else 0.0;
-        nextCrossing.y += if (alongX) 0.0 else crossingIncr.y;
-        nextDistance = std.math.min(nextCrossing.x, nextCrossing.y);
+        prev_distance = next_distance;
+        const along_x = next_crossing.x < next_crossing.y;
+        pixel.x += if (along_x) dir.x else 0;
+        pixel.y += if (along_x) 0 else dir.y;
+        next_crossing.x += if (along_x) crossingIncr.x else 0.0;
+        next_crossing.y += if (along_x) 0.0 else crossingIncr.y;
+        next_distance = std.math.min(next_crossing.x, next_crossing.y);
     }
 
-    var xAverage = origin.x + (prevDistance + 1.0) * halfDeltaX;
-    const yDifference = (1.0 - prevDistance) * delta.y;
+    var x_average = origin.x + (prev_distance + 1.0) * half_delta_x;
+    const y_difference = (1.0 - prev_distance) * delta.y;
     const cptr = &buf.cells[@intCast(usize, pixel.y * buf.size.x + pixel.x)];
     var cell = cptr.*;
-    cell.cover += yDifference;
-    xAverage -= @intToFloat(Float, pixel.x);
-    cell.area += (1.0 - xAverage) * yDifference;
+    cell.cover += y_difference;
+    x_average -= @intToFloat(Float, pixel.x);
+    cell.area += (1.0 - x_average) * y_difference;
     cptr.* = cell;
 }
 
@@ -1095,19 +1094,19 @@ fn renderOutline(
         }
     }
 
-    const numPixels = @intCast(usize, size.x) * @intCast(usize, size.y);
+    const num_pixels = @intCast(usize, size.x) * @intCast(usize, size.y);
     // TODO: the following commented line should work but the zig compiler
     //       isn't optimizing it correctly which causes *extreme* slowdown
     // Zig's 'undefined' debug checks make this ungodly slow
     const stack_len = if (builtin.mode == .Debug) 0 else 128 * 128;
     //var cellStackBuf = stackBuf(Cell, stack_len);
     const CellBuf = StackBuf(Cell, stack_len);
-    var cellStackBuf: CellBuf = undefined;
-    const cells = try cellStackBuf.alloc(allocator, numPixels);
+    var cell_stack_buf: CellBuf = undefined;
+    const cells = try cell_stack_buf.alloc(allocator, num_pixels);
     defer CellBuf.free(allocator, cells);
 
     // TODO: I wonder if this could be removed?
-    @memset(@ptrCast([*]u8, cells), 0, numPixels * @sizeOf(@TypeOf(cells[0])));
+    @memset(@ptrCast([*]u8, cells), 0, num_pixels * @sizeOf(@TypeOf(cells[0])));
     const buf = Raster{
         .cells = cells,
         .size = size,

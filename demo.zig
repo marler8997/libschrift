@@ -18,15 +18,15 @@ pub fn main() !void {
     const lmetrics = try schrift.lmetrics(ttf_mem, ttf_info, scale.y);
     std.debug.assert(lmetrics.ascender >= 0);
     std.debug.assert(lmetrics.descender <= 0);
-    std.debug.assert(lmetrics.lineGap >= 0);
+    std.debug.assert(lmetrics.line_gap >= 0);
     const ascent = @floatToInt(i32, @ceil(lmetrics.ascender));
     const descent = @floatToInt(i32, @floor(lmetrics.descender));
-    const line_gap = @floatToInt(u32, @ceil(lmetrics.lineGap));
+    const line_gap = @floatToInt(u32, @ceil(lmetrics.line_gap));
     //const text_height = @intCast(u32, ascent - descent);
     std.log.info("lmetrics: ascent={d:.2} ({}) descent={d:.2} ({}) gap={d:.2} ({})", .{
         lmetrics.ascender, ascent,
         lmetrics.descender, descent,
-        lmetrics.lineGap, line_gap});
+        lmetrics.line_gap, line_gap});
     //std.log.info("          text_height = {d}", .{text_height});
 
     const downward = true;
@@ -57,15 +57,15 @@ pub fn main() !void {
             };
             const gmetrics = try schrift.gmetrics(ttf_mem, ttf_info, downward, scale, offset, gid);
             var size = schrift.XY(i32){
-                .x = std.mem.alignForwardGeneric(i32, gmetrics.minWidth, 4),
-                .y = gmetrics.minHeight,
+                .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
+                .y = gmetrics.min_height,
             };
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
             line_width += @intCast(u32, size.x) + hgap;
             max_glyph_width  = std.math.max(max_glyph_width, @intCast(u32, size.x));
             max_glyph_height = std.math.max(max_glyph_height, @intCast(u32, size.y));
 
-            const top: i32 = ascent + gmetrics.yOffset;
+            const top: i32 = ascent + gmetrics.y_offset;
             const bottom: i32 = top + size.y;
 
             min_glyph_top = std.math.min(min_glyph_top, top);
@@ -110,8 +110,8 @@ pub fn main() !void {
             const gid = schrift.lookupGlyph(ttf_mem, c) catch unreachable;
             const gmetrics = schrift.gmetrics(ttf_mem, ttf_info, downward, scale, offset, gid) catch unreachable;
             var size = schrift.XY(i32){
-                .x = std.mem.alignForwardGeneric(i32, gmetrics.minWidth, 4),
-                .y = gmetrics.minHeight,
+                .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
+                .y = gmetrics.min_height,
             };
 
             var render_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -133,8 +133,8 @@ pub fn main() !void {
                 gid,
             );
 
-            const top = @intCast(usize, ascent + gmetrics.yOffset - min_glyph_top);
-            //std.log.info("{} {}x{} yOffset={} top={}", .{c, size.x, size.y, gmetrics.yOffset, top});
+            const top = @intCast(usize, ascent + gmetrics.y_offset - min_glyph_top);
+            //std.log.info("{} {}x{} y_offset={} top={}", .{c, size.x, size.y, gmetrics.y_offset, top});
             copyBox(
                 line_buf[(x * 3) + (line_stride * top)..],
                 line_stride,
