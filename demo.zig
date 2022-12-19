@@ -33,8 +33,6 @@ pub fn main() !void {
 
     const glass = try readFile(arena.allocator(), "resources/glass.utf8");
 
-    const hgap = 1;
-
     var image_width: u32 = 0;
     var line_count: u32 = 0;
     var max_glyph_width: u32 = 0;
@@ -61,7 +59,8 @@ pub fn main() !void {
                 .y = gmetrics.min_height,
             };
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
-            line_width += @intCast(u32, size.x) + hgap;
+            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width));
+            line_width += advance_width;
             max_glyph_width  = std.math.max(max_glyph_width, @intCast(u32, size.x));
             max_glyph_height = std.math.max(max_glyph_height, @intCast(u32, size.y));
 
@@ -82,7 +81,8 @@ pub fn main() !void {
 
     const line_stride = image_width * 3;
     const line_buf = try arena.allocator().alloc(u8, max_render_height * line_stride);
-    std.mem.set(u8, line_buf, 0x33);
+    const background = 0x00;
+    std.mem.set(u8, line_buf, background);
 
     // defer arena.allocator().free(line_buf);
     const glyph_pixel_buf = try arena.allocator().alloc(u8, max_glyph_width * max_glyph_height);
@@ -101,7 +101,7 @@ pub fn main() !void {
         while (it.nextCodepoint()) |c| {
             if (c == '\n') {
                 try writer.writeAll(line_buf);
-                std.mem.set(u8, line_buf, 0x33);
+                std.mem.set(u8, line_buf, background);
                 x = 0;
                 y += max_render_height;
                 //std.log.info("next line y={}!", .{y});
@@ -142,7 +142,13 @@ pub fn main() !void {
                 @intCast(usize, size.x),
                 @intCast(usize, size.y),
             );
-            x += @intCast(usize, size.x) + hgap;
+            //std.log.info("{} width={} lsb={d:.2} advance={d:.2}", .{
+            //    c, size.x,
+            //    gmetrics.left_side_bearing,
+            //    gmetrics.advance_width,
+            //});
+            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width));
+            x += advance_width;
         }
     }
 }
