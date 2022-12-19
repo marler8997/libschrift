@@ -56,7 +56,7 @@ pub fn main() !void {
             };
             const gmetrics = try schrift.gmetrics(ttf_mem, ttf_info, downward, scale, offset, gid);
             var size = schrift.XY(i32){
-                .x = (gmetrics.minWidth + 3) & ~@as(i32, 3),
+                .x = std.mem.alignForwardGeneric(i32, gmetrics.minWidth, 4),
                 .y = gmetrics.minHeight,
             };
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
@@ -109,7 +109,7 @@ pub fn main() !void {
             const gid = schrift.lookupGlyph(ttf_mem, c) catch unreachable;
             const gmetrics = schrift.gmetrics(ttf_mem, ttf_info, downward, scale, offset, gid) catch unreachable;
             var size = schrift.XY(i32){
-                .x = (gmetrics.minWidth + 3) & ~@as(i32, 3),
+                .x = std.mem.alignForwardGeneric(i32, gmetrics.minWidth, 4),
                 .y = gmetrics.minHeight,
             };
 
