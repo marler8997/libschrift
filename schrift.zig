@@ -202,8 +202,8 @@ pub fn getTtfInfo(ttf_mem: []const u8) !TtfInfo {
         return error.TtfBadHheaTable;
     return TtfInfo{
         .unitsPerEm = readTtf(u16, ttf_mem[head + 18 ..]),
-        .locaFormat = readTtf(i16, ttf_mem[head + 15 ..]),
         .numLongHmtx = readTtf(u16, ttf_mem[hhea + 34 ..]),
+        .locaFormat = readTtf(i16, ttf_mem[head + 50 ..]),
     };
 }
 
