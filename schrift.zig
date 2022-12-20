@@ -262,12 +262,12 @@ fn clipPoints(points: []Point, width: Float, height: Float) void {
 }
 
 fn bsearch(
-    key: *const anyopaque,
-    base: *const anyopaque,
+    key: [*]const u8,
+    base: [*]const u8,
     nmemb: usize,
     size: usize,
     compar: *const fn ([*]const u8, [*]const u8) i2,
-) ?*const anyopaque {
+) ?[*]const u8 {
     var next_base = base;
     var nel = nmemb;
     while (nel > 0) {
@@ -287,12 +287,12 @@ fn bsearch(
 
 // Like bsearch(), but returns the next highest element if key could not be found.
 fn csearch(
-    key: *const anyopaque,
-    base: *const anyopaque,
+    key: [*]const u8,
+    base: [*]const u8,
     nmemb: usize,
     size: usize,
     compar: *const fn ([*]const u8, [*]const u8) i2,
-) ?*const anyopaque {
+) ?[*]const u8 {
     if (nmemb == 0) return null;
 
     const bytes = @ptrCast([*]const u8, base);
@@ -336,8 +336,7 @@ fn getTable(ttf_mem: []const u8, tag: *const [4]u8) !?u32 {
     if (limit > ttf_mem.len)
         return error.TtfBadTables;
     const match_ptr = bsearch(tag, ttf_mem.ptr + 12, num_tables, 16, cmpu32) orelse return null;
-    const match_offset = @ptrToInt(match_ptr) - @ptrToInt(ttf_mem.ptr);
-    return readTtf(u32, ttf_mem[match_offset + 8 ..]);
+    return readTtf(u32, match_ptr[8 .. 12]);
 }
 
 fn cmapFmt4(ttf_mem: []const u8, table: usize, char_code: u32) !u32 {

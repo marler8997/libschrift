@@ -2,20 +2,16 @@ const std = @import("std");
 const schrift = @import("schrift.zig");
 const Float = schrift.Float;
 
+const font = struct {
+    pub const ttf = @embedFile("resources/FiraGO-Regular_extended_with_NotoSansEgyptianHieroglyphs-Regular.ttf");
+    pub const info = schrift.getTtfInfo(ttf) catch unreachable;
+};
+
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    // arena.deinit();
-
-    const ttf_mem = try readFile(
-        arena.allocator(),
-        "resources/FiraGO-Regular_extended_with_NotoSansEgyptianHieroglyphs-Regular.ttf",
-    );
-    const ttf_info = try schrift.getTtfInfo(ttf_mem);
-
     const scale = schrift.XY(Float) { .x = 32.0, .y = 32.0 };
     const offset = schrift.XY(Float) { .x = 0, .y = 0 };
 
-    const lmetrics = try schrift.lmetrics(ttf_mem, ttf_info, scale.y);
+    const lmetrics = try schrift.lmetrics(font.ttf, font.info, scale.y);
     std.debug.assert(lmetrics.ascender >= 0);
     std.debug.assert(lmetrics.descender <= 0);
     std.debug.assert(lmetrics.line_gap >= 0);
@@ -31,6 +27,8 @@ pub fn main() !void {
 
     const downward = true;
 
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    // arena.deinit();
     const glass = try readFile(arena.allocator(), "resources/glass.utf8");
 
     var image_width: u32 = 0;
@@ -49,11 +47,11 @@ pub fn main() !void {
                 line_width = 0;
                 continue;
             }
-            const gid = schrift.lookupGlyph(ttf_mem, c) catch |err| {
+            const gid = schrift.lookupGlyph(font.ttf, c) catch |err| {
                 std.log.err("failed to get glyph id for {}: {s}", .{c, @errorName(err)});
                 continue;
             };
-            const gmetrics = try schrift.gmetrics(ttf_mem, ttf_info, downward, scale, offset, gid);
+            const gmetrics = try schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid);
             var size = schrift.XY(i32){
                 .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
                 .y = gmetrics.min_height,
@@ -107,8 +105,8 @@ pub fn main() !void {
                 //std.log.info("next line y={}!", .{y});
                 continue;
             }
-            const gid = schrift.lookupGlyph(ttf_mem, c) catch unreachable;
-            const gmetrics = schrift.gmetrics(ttf_mem, ttf_info, downward, scale, offset, gid) catch unreachable;
+            const gid = schrift.lookupGlyph(font.ttf, c) catch unreachable;
+            const gmetrics = schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid) catch unreachable;
             var size = schrift.XY(i32){
                 .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
                 .y = gmetrics.min_height,
@@ -123,8 +121,8 @@ pub fn main() !void {
             const pixel_buf_len = @intCast(usize, size.x) * @intCast(usize, size.y);
             try schrift.render(
                 render_arena.allocator(),
-                ttf_mem,
-                ttf_info,
+                font.ttf,
+                font.info,
                 downward,
                 scale,
                 offset,
