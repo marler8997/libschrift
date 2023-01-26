@@ -42,6 +42,11 @@ const Outline = struct {
     }
 };
 
+const Kerning = struct {
+    x_shift: Float,
+    y_shift: Float,
+};
+
 const Cell = struct {
     area: Float,
     cover: Float,
@@ -54,6 +59,11 @@ const Raster = struct {
 const ttf = struct {
     pub const file_magic_one = 0x00010000;
     pub const file_magic_two = 0x74727565;
+
+    pub const horizonal_kerning = 0x01;
+    pub const minimum_kerning = 0x02;
+    pub const cross_stream_kerning = 0x04;
+    pub const override_kerning = 0x08;
 
     pub const point_is_on_curve = 0x01;
     pub const x_change_is_small = 0x02;
@@ -139,6 +149,65 @@ pub fn gmetrics(
         .min_width = @floatToInt(i32, bbox.x_max) - @floatToInt(i32, bbox.x_min) + 1,
         .min_height = y_max - y_min + 1,
         .y_offset = if (downward) -y_max else y_min,
+    };
+}
+
+pub fn kerning(
+    ttf_mem: []const u8,
+    info: TtfInfo,
+    scale: XY(Float),
+    left_glyph: u32,
+    right_glyph: u32,
+) !Kerning {
+    var x_shift: Float = 0;
+    var y_shift: Float = 0;
+
+    var offset = try getTable(ttf_mem, "kern") orelse {
+        return .{ .x_shift = 0, .y_shift = 0 };
+    };
+
+    var num_tables = readTtf(u16, ttf_mem[offset + 2 ..]);
+    offset += 4;
+
+    while (num_tables > 0) : (num_tables -= 1) {
+        const length = readTtf(u16, ttf_mem[offset + 2 ..]);
+        const format = readTtf(u8, ttf_mem[offset + 4 ..]);
+        const flags = readTtf(u8, ttf_mem[offset + 5 ..]);
+        offset += 6;
+
+        if (format == 0 and
+            (flags & ttf.horizonal_kerning) > 0 and
+            (flags & ttf.minimum_kerning) == 0)
+        {
+            const num_pairs = readTtf(u16, ttf_mem[offset..]);
+            offset += 8;
+
+            const key: [4]u8 = .{
+                @intCast(u8, (left_glyph >> 8) & 0xFF),
+                @intCast(u8, left_glyph & 0xFF),
+                @intCast(u8, (right_glyph >> 8) & 0xFF),
+                @intCast(u8, right_glyph & 0xFF),
+            };
+
+            if (bsearch(&key, ttf_mem.ptr + offset, num_pairs, 6, cmpu32)) |match| {
+                const value = readTtf(
+                    i16,
+                    ttf_mem[@ptrToInt(match) - @ptrToInt(ttf_mem.ptr) + 4 ..],
+                );
+                if (flags & ttf.cross_stream_kerning > 0) {
+                    y_shift += @intToFloat(Float, value);
+                } else {
+                    x_shift += @intToFloat(Float, value);
+                }
+            }
+        }
+
+        offset += length;
+    }
+
+    return .{
+        .x_shift = x_shift / @intToFloat(Float, info.units_per_em) * scale.x,
+        .y_shift = y_shift / @intToFloat(Float, info.units_per_em) * scale.y,
     };
 }
 
@@ -336,7 +405,7 @@ fn getTable(ttf_mem: []const u8, tag: *const [4]u8) !?u32 {
     if (limit > ttf_mem.len)
         return error.TtfBadTables;
     const match_ptr = bsearch(tag, ttf_mem.ptr + 12, num_tables, 16, cmpu32) orelse return null;
-    return readTtf(u32, match_ptr[8 .. 12]);
+    return readTtf(u32, match_ptr[8..12]);
 }
 
 fn cmapFmt4(ttf_mem: []const u8, table: usize, char_code: u32) !u32 {
@@ -743,7 +812,7 @@ fn simpleOutline(
     if (limit > ttf_mem.len)
         return error.TtfBadOutline;
     const num_pts = blk: {
-        var num = readTtf(u16, ttf_mem[offset_start + (num_contours - 1) * 2..]);
+        var num = readTtf(u16, ttf_mem[offset_start + (num_contours - 1) * 2 ..]);
         break :blk add(u16, num, 1) orelse return error.TtfBadOutline;
     };
     if (outl.points.items.len + @intCast(usize, num_pts) > std.math.maxInt(u16))
@@ -826,8 +895,8 @@ fn compoundOutline(
         var local = [_]Float{0} ** 6;
         if (offset + 4 > ttf_mem.len)
             return error.TtfBadOutline;
-        const flags = readTtf(u16, ttf_mem[offset + 0..]);
-        const glyph = readTtf(u16, ttf_mem[offset + 2..]);
+        const flags = readTtf(u16, ttf_mem[offset + 0 ..]);
+        const glyph = readTtf(u16, ttf_mem[offset + 2 ..]);
         offset += 4;
         // We don't implement point matching, and neither does stb_truetype for that matter.
         if (0 == (flags & ttf.actual_xy_offsets))
@@ -836,8 +905,8 @@ fn compoundOutline(
         if (0 != (flags & ttf.offsets_are_large)) {
             if (offset + 4 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[4] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0..]));
-            local[5] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2..]));
+            local[4] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0 ..]));
+            local[5] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2 ..]));
             offset += 4;
         } else {
             if (offset + 2 > ttf_mem.len)
@@ -855,16 +924,16 @@ fn compoundOutline(
         } else if (0 != (flags & ttf.got_an_x_and_y_scale)) {
             if (offset + 4 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
-            local[3] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
+            local[0] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0 ..])) / 16384.0;
+            local[3] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2 ..])) / 16384.0;
             offset += 4;
         } else if (0 != (flags & ttf.got_a_scale_matrix)) {
             if (offset + 8 > ttf_mem.len)
                 return error.TtfBadOutline;
-            local[0] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0..])) / 16384.0;
-            local[1] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2..])) / 16384.0;
-            local[2] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 4..])) / 16384.0;
-            local[3] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 6..])) / 16384.0;
+            local[0] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 0 ..])) / 16384.0;
+            local[1] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 2 ..])) / 16384.0;
+            local[2] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 4 ..])) / 16384.0;
+            local[3] = @intToFloat(Float, readTtf(i16, ttf_mem[offset + 6 ..])) / 16384.0;
             offset += 8;
         } else {
             local[0] = 1.0;
