@@ -42,11 +42,6 @@ const Outline = struct {
     }
 };
 
-const Kerning = struct {
-    x_shift: Float,
-    y_shift: Float,
-};
-
 const Cell = struct {
     area: Float,
     cover: Float,
@@ -158,12 +153,12 @@ pub fn kerning(
     scale: XY(Float),
     left_glyph: u32,
     right_glyph: u32,
-) !Kerning {
+) !XY(Float) {
     var x_shift: Float = 0;
     var y_shift: Float = 0;
 
     var offset = try getTable(ttf_mem, "kern") orelse {
-        return .{ .x_shift = 0, .y_shift = 0 };
+        return .{ .x = 0, .y = 0 };
     };
 
     var num_tables = readTtf(u16, ttf_mem[offset + 2 ..]);
@@ -206,8 +201,8 @@ pub fn kerning(
     }
 
     return .{
-        .x_shift = x_shift / @intToFloat(Float, info.units_per_em) * scale.x,
-        .y_shift = y_shift / @intToFloat(Float, info.units_per_em) * scale.y,
+        .x = x_shift / @intToFloat(Float, info.units_per_em) * scale.x,
+        .y = y_shift / @intToFloat(Float, info.units_per_em) * scale.y,
     };
 }
 
