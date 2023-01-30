@@ -8,8 +8,8 @@ const font = struct {
 };
 
 pub fn main() !void {
-    const scale = schrift.XY(Float) { .x = 32.0, .y = 32.0 };
-    const offset = schrift.XY(Float) { .x = 0, .y = 0 };
+    const scale = schrift.XY(Float){ .x = 32.0, .y = 32.0 };
+    const offset = schrift.XY(Float){ .x = 0, .y = 0 };
 
     const lmetrics = try schrift.lmetrics(font.ttf, font.info, scale.y);
     std.debug.assert(lmetrics.ascender >= 0);
@@ -19,10 +19,7 @@ pub fn main() !void {
     const descent = @floatToInt(i32, @floor(lmetrics.descender));
     const line_gap = @floatToInt(u32, @ceil(lmetrics.line_gap));
     //const text_height = @intCast(u32, ascent - descent);
-    std.log.info("lmetrics: ascent={d:.2} ({}) descent={d:.2} ({}) gap={d:.2} ({})", .{
-        lmetrics.ascender, ascent,
-        lmetrics.descender, descent,
-        lmetrics.line_gap, line_gap});
+    std.log.info("lmetrics: ascent={d:.2} ({}) descent={d:.2} ({}) gap={d:.2} ({})", .{ lmetrics.ascender, ascent, lmetrics.descender, descent, lmetrics.line_gap, line_gap });
     //std.log.info("          text_height = {d}", .{text_height});
 
     const downward = true;
@@ -40,42 +37,55 @@ pub fn main() !void {
     {
         var it = std.unicode.Utf8Iterator{ .bytes = glass, .i = 0 };
         var line_width: u32 = 0;
+        var maybe_prev_gid: ?u32 = null;
         while (it.nextCodepoint()) |c| {
             if (c == '\n') {
                 image_width = std.math.max(image_width, line_width);
                 line_count += 1;
                 line_width = 0;
+                maybe_prev_gid = null;
                 continue;
             }
+
             const gid = schrift.lookupGlyph(font.ttf, c) catch |err| {
-                std.log.err("failed to get glyph id for {}: {s}", .{c, @errorName(err)});
+                std.log.err("failed to get glyph id for {}: {s}", .{ c, @errorName(err) });
                 continue;
             };
+            defer maybe_prev_gid = gid;
+
             const gmetrics = try schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid);
             var size = schrift.XY(i32){
                 .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
                 .y = gmetrics.min_height,
             };
+
+            const kerning = if (maybe_prev_gid) |prev_gid| try schrift.kerning(
+                font.ttf,
+                font.info,
+                scale,
+                prev_gid,
+                gid,
+            ) else schrift.XY(Float){ .x = 0, .y = 0 };
+
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
-            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width));
+            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width + kerning.x));
             line_width += advance_width;
-            max_glyph_width  = std.math.max(max_glyph_width, @intCast(u32, size.x));
+            max_glyph_width = std.math.max(max_glyph_width, @intCast(u32, size.x));
             max_glyph_height = std.math.max(max_glyph_height, @intCast(u32, size.y));
 
-            const top: i32 = ascent + gmetrics.y_offset;
-            const bottom: i32 = top + size.y;
+            const top: Float = lmetrics.ascender + @intToFloat(Float, gmetrics.y_offset) + kerning.y;
+            const bottom: Float = top + @intToFloat(Float, size.y) + kerning.y;
 
-            min_glyph_top = std.math.min(min_glyph_top, top);
-            max_glyph_bottom = std.math.max(max_glyph_bottom, bottom);
+            min_glyph_top = std.math.min(min_glyph_top, @floatToInt(i32, @floor(top)));
+            max_glyph_bottom = std.math.max(max_glyph_bottom, @floatToInt(i32, @ceil(bottom)));
         }
     }
 
     const max_render_height = @intCast(usize, max_glyph_bottom - min_glyph_top);
-    std.log.info("min_top={} max_bottom={} height={}", .{min_glyph_top, max_glyph_bottom, max_render_height});
+    std.log.info("min_top={} max_bottom={} height={}", .{ min_glyph_top, max_glyph_bottom, max_render_height });
 
     const image_height = max_render_height * line_count;
-    std.log.info("{} lines, image={}x{} max-glyph={}x{}", .{
-        line_count, image_width, image_height, max_glyph_width, max_glyph_height});
+    std.log.info("{} lines, image={}x{} max-glyph={}x{}", .{ line_count, image_width, image_height, max_glyph_width, max_glyph_height });
 
     const line_stride = image_width * 3;
     const line_buf = try arena.allocator().alloc(u8, max_render_height * line_stride);
@@ -90,12 +100,13 @@ pub fn main() !void {
     var out_file = try std.fs.cwd().createFile("glass.ppm", .{});
     defer out_file.close();
     const writer = out_file.writer();
-    try writer.print("P6\n{} {}\n255\n", .{image_width, image_height});
+    try writer.print("P6\n{} {}\n255\n", .{ image_width, image_height });
 
     {
         var it = std.unicode.Utf8Iterator{ .bytes = glass, .i = 0 };
         var x: usize = 0;
         var y: usize = 0;
+        var maybe_prev_gid: ?u32 = null;
         while (it.nextCodepoint()) |c| {
             if (c == '\n') {
                 try writer.writeAll(line_buf);
@@ -103,9 +114,13 @@ pub fn main() !void {
                 x = 0;
                 y += max_render_height;
                 //std.log.info("next line y={}!", .{y});
+                maybe_prev_gid = null;
                 continue;
             }
+
             const gid = schrift.lookupGlyph(font.ttf, c) catch unreachable;
+            defer maybe_prev_gid = gid;
+
             const gmetrics = schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid) catch unreachable;
             var size = schrift.XY(i32){
                 .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
@@ -126,15 +141,23 @@ pub fn main() !void {
                 downward,
                 scale,
                 offset,
-                glyph_pixel_buf[0 .. pixel_buf_len],
+                glyph_pixel_buf[0..pixel_buf_len],
                 size,
                 gid,
             );
 
-            const top = @intCast(usize, ascent + gmetrics.y_offset - min_glyph_top);
+            const kerning = if (maybe_prev_gid) |prev_gid| try schrift.kerning(
+                font.ttf,
+                font.info,
+                scale,
+                prev_gid,
+                gid,
+            ) else schrift.XY(Float){ .x = 0, .y = 0 };
+
+            const top = @intCast(usize, ascent + gmetrics.y_offset - min_glyph_top + @floatToInt(i32, kerning.y));
             //std.log.info("{} {}x{} y_offset={} top={}", .{c, size.x, size.y, gmetrics.y_offset, top});
             copyBox(
-                line_buf[(x * 3) + (line_stride * top)..],
+                line_buf[(@floatToInt(usize, @intToFloat(f32, x) + @ceil(kerning.x)) * 3) + (line_stride * top) ..],
                 line_stride,
                 glyph_pixel_buf.ptr,
                 @intCast(usize, size.x),
@@ -145,7 +168,7 @@ pub fn main() !void {
             //    gmetrics.left_side_bearing,
             //    gmetrics.advance_width,
             //});
-            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width));
+            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width + kerning.x));
             x += advance_width;
         }
     }
@@ -171,9 +194,9 @@ fn copyBox(
         {
             var i: usize = 0;
             while (i < src_width) : (i += 1) {
-                dst[dst_off + 3*i + 0] = src[src_off + i];
-                dst[dst_off + 3*i + 1] = src[src_off + i];
-                dst[dst_off + 3*i + 2] = src[src_off + i];
+                dst[dst_off + 3 * i + 0] = src[src_off + i];
+                dst[dst_off + 3 * i + 1] = src[src_off + i];
+                dst[dst_off + 3 * i + 2] = src[src_off + i];
             }
         }
         dst_off += dst_stride;
