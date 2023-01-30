@@ -15,11 +15,10 @@ pub fn main() !void {
     std.debug.assert(lmetrics.ascender >= 0);
     std.debug.assert(lmetrics.descender <= 0);
     std.debug.assert(lmetrics.line_gap >= 0);
-    const ascent = @floatToInt(i32, @ceil(lmetrics.ascender));
     const descent = @floatToInt(i32, @floor(lmetrics.descender));
     const line_gap = @floatToInt(u32, @ceil(lmetrics.line_gap));
     //const text_height = @intCast(u32, ascent - descent);
-    std.log.info("lmetrics: ascent={d:.2} ({}) descent={d:.2} ({}) gap={d:.2} ({})", .{ lmetrics.ascender, ascent, lmetrics.descender, descent, lmetrics.line_gap, line_gap });
+    std.log.info("lmetrics: ascent={d:.2} descent={d:.2} ({}) gap={d:.2} ({})", .{ lmetrics.ascender, lmetrics.descender, descent, lmetrics.line_gap, line_gap });
     //std.log.info("          text_height = {d}", .{text_height});
 
     const downward = true;
@@ -73,11 +72,11 @@ pub fn main() !void {
             max_glyph_width = std.math.max(max_glyph_width, @intCast(u32, size.x));
             max_glyph_height = std.math.max(max_glyph_height, @intCast(u32, size.y));
 
-            const top: Float = lmetrics.ascender + @intToFloat(Float, gmetrics.y_offset) + kerning.y;
-            const bottom: Float = top + @intToFloat(Float, size.y) + kerning.y;
+            const top = @floatToInt(i32, @floor(lmetrics.ascender + @intToFloat(Float, gmetrics.y_offset) + kerning.y));
+            const bottom = top + @floatToInt(i32, @ceil(@intToFloat(Float, size.y) + kerning.y));
 
-            min_glyph_top = std.math.min(min_glyph_top, @floatToInt(i32, @floor(top)));
-            max_glyph_bottom = std.math.max(max_glyph_bottom, @floatToInt(i32, @ceil(bottom)));
+            min_glyph_top = std.math.min(min_glyph_top, top);
+            max_glyph_bottom = std.math.max(max_glyph_bottom, bottom);
         }
     }
 
@@ -154,10 +153,11 @@ pub fn main() !void {
                 gid,
             ) else schrift.XY(Float){ .x = 0, .y = 0 };
 
-            const top = @intCast(usize, ascent + gmetrics.y_offset - min_glyph_top + @floatToInt(i32, kerning.y));
+            const top = @floatToInt(i32, @floor(lmetrics.ascender + @intToFloat(Float, gmetrics.y_offset) + kerning.y));
+            const line_top = @intCast(usize, top - min_glyph_top);
             //std.log.info("{} {}x{} y_offset={} top={}", .{c, size.x, size.y, gmetrics.y_offset, top});
             copyBox(
-                line_buf[(@floatToInt(usize, @intToFloat(f32, x) + @ceil(kerning.x)) * 3) + (line_stride * top) ..],
+                line_buf[(@floatToInt(usize, @intToFloat(f32, x) + @ceil(kerning.x)) * 3) + (line_stride * line_top) ..],
                 line_stride,
                 glyph_pixel_buf.ptr,
                 @intCast(usize, size.x),
