@@ -161,19 +161,27 @@ pub fn kerning(
         return .{ .x = 0, .y = 0 };
     };
 
+    if (offset + 4 > ttf_mem.len)
+        return error.TtfBadKerning;
     var num_tables = readTtf(u16, ttf_mem[offset + 2 ..]);
     offset += 4;
 
     while (num_tables > 0) : (num_tables -= 1) {
+        if (offset + 6 > ttf_mem.len)
+            return error.TtfBadKerning;
+
         const length = readTtf(u16, ttf_mem[offset + 2 ..]);
         const format = readTtf(u8, ttf_mem[offset + 4 ..]);
         const flags = readTtf(u8, ttf_mem[offset + 5 ..]);
         offset += 6;
 
         if (format == 0 and
-            (flags & ttf.horizonal_kerning) > 0 and
+            (flags & ttf.horizonal_kerning) != 0 and
             (flags & ttf.minimum_kerning) == 0)
         {
+            if (offset + 8 > ttf_mem.len)
+                return error.TtfBadKerning;
+
             const num_pairs = readTtf(u16, ttf_mem[offset..]);
             offset += 8;
 
@@ -189,7 +197,7 @@ pub fn kerning(
                     i16,
                     ttf_mem[@ptrToInt(match) - @ptrToInt(ttf_mem.ptr) + 4 ..],
                 );
-                if (flags & ttf.cross_stream_kerning > 0) {
+                if (flags & ttf.cross_stream_kerning != 0) {
                     y_shift += @intToFloat(Float, value);
                 } else {
                     x_shift += @intToFloat(Float, value);
