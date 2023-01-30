@@ -15,10 +15,12 @@ pub fn main() !void {
     std.debug.assert(lmetrics.ascender >= 0);
     std.debug.assert(lmetrics.descender <= 0);
     std.debug.assert(lmetrics.line_gap >= 0);
-    const descent = @floatToInt(i32, @floor(lmetrics.descender));
     const line_gap = @floatToInt(u32, @ceil(lmetrics.line_gap));
     //const text_height = @intCast(u32, ascent - descent);
-    std.log.info("lmetrics: ascent={d:.2} descent={d:.2} ({}) gap={d:.2} ({})", .{ lmetrics.ascender, lmetrics.descender, descent, lmetrics.line_gap, line_gap });
+    std.log.info(
+        "lmetrics: ascent={d:.2} descent={d:.2} gap={d:.2} ({})",
+        .{ lmetrics.ascender, lmetrics.descender, lmetrics.line_gap, line_gap },
+    );
     //std.log.info("          text_height = {d}", .{text_height});
 
     const downward = true;
@@ -50,14 +52,6 @@ pub fn main() !void {
                 std.log.err("failed to get glyph id for {}: {s}", .{ c, @errorName(err) });
                 continue;
             };
-            defer maybe_prev_gid = gid;
-
-            const gmetrics = try schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid);
-            var size = schrift.XY(i32){
-                .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
-                .y = gmetrics.min_height,
-            };
-
             const kerning = if (maybe_prev_gid) |prev_gid| try schrift.kerning(
                 font.ttf,
                 font.info,
@@ -65,6 +59,13 @@ pub fn main() !void {
                 prev_gid,
                 gid,
             ) else schrift.XY(Float){ .x = 0, .y = 0 };
+            maybe_prev_gid = gid;
+
+            const gmetrics = try schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid);
+            var size = schrift.XY(i32){
+                .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
+                .y = gmetrics.min_height,
+            };
 
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
             const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width + kerning.x));
@@ -118,7 +119,14 @@ pub fn main() !void {
             }
 
             const gid = schrift.lookupGlyph(font.ttf, c) catch unreachable;
-            defer maybe_prev_gid = gid;
+            const kerning = if (maybe_prev_gid) |prev_gid| try schrift.kerning(
+                font.ttf,
+                font.info,
+                scale,
+                prev_gid,
+                gid,
+            ) else schrift.XY(Float){ .x = 0, .y = 0 };
+            maybe_prev_gid = gid;
 
             const gmetrics = schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid) catch unreachable;
             var size = schrift.XY(i32){
@@ -144,14 +152,6 @@ pub fn main() !void {
                 size,
                 gid,
             );
-
-            const kerning = if (maybe_prev_gid) |prev_gid| try schrift.kerning(
-                font.ttf,
-                font.info,
-                scale,
-                prev_gid,
-                gid,
-            ) else schrift.XY(Float){ .x = 0, .y = 0 };
 
             const top = @floatToInt(i32, @floor(lmetrics.ascender + @intToFloat(Float, gmetrics.y_offset) + kerning.y));
             const line_top = @intCast(usize, top - min_glyph_top);
