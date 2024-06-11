@@ -18,10 +18,10 @@ pub const Font = struct {
     },
     info: schrift.TtfInfo,
     pub fn fromC(ptr: *c.SFT_Font) *Font {
-        return @ptrCast(*Font, @alignCast(@alignOf(Font), ptr));
+        return @alignCast(@ptrCast(ptr));
     }
     pub fn toC(self: *Font) *c.SFT_Font {
-        return @ptrCast(*c.SFT_Font, self);
+        return @alignCast(@ptrCast(self));
     }
 };
 
@@ -31,7 +31,7 @@ export fn sft_version() [*:0]const u8 {
 
 fn allocFont() error{OutOfMemory}!*Font {
     const ptr = c.calloc(1, @sizeOf(Font)) orelse return error.OutOfMemory;
-    return @ptrCast(*Font, @alignCast(@alignOf(Font), ptr));
+    return @alignCast(@ptrCast(ptr));
 }
 
 // Loads a font from a user-supplied memory range.
@@ -83,7 +83,7 @@ export fn sft_lmetrics(sft: *const c.SFT, metrics: *c.SFT_LMetrics) c_int {
 }
 export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: *c.SFT_Glyph) c_int {
     const font = Font.fromC(sft.font orelse unreachable);
-    if (schrift.lookupGlyph(font.mem, @intCast(u32, codepoint))) |g| {
+    if (schrift.lookupGlyph(font.mem, @intCast(codepoint))) |g| {
         glyph.* = g;
         return 0;
     } else |_| {
@@ -93,7 +93,7 @@ export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: *c.SFT_Gl
 }
 
 export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics) c_int {
-    @memset(@ptrCast([*]u8, metrics), 0, @sizeOf(@TypeOf(metrics.*)));
+    @memset(@as([*]u8, @ptrCast(metrics))[0 .. @sizeOf(c.SFT_GMetrics)], 0);
 
     const font = Font.fromC(sft.font orelse unreachable);
     const m = schrift.gmetrics(
@@ -102,14 +102,14 @@ export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics
         (sft.flags & c.SFT_DOWNWARD_Y) != 0,
         .{ .x = sft.xScale, .y = sft.yScale },
         .{ .x = sft.xOffset, .y = sft.yOffset },
-        @intCast(u32, glyph),
+        @intCast(glyph),
     ) catch return -1;
     metrics.* = .{
         .advanceWidth = m.advance_width,
         .leftSideBearing = m.left_side_bearing,
-        .yOffset = @intCast(c_int, m.y_offset),
-        .minWidth = @intCast(c_int, m.min_width),
-        .minHeight = @intCast(c_int, m.min_height),
+        .yOffset = @intCast(m.y_offset),
+        .minWidth = @intCast(m.min_width),
+        .minHeight = @intCast(m.min_height),
     };
     return 0;
 }
@@ -146,9 +146,9 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
         (sft.flags & c.SFT_DOWNWARD_Y) != 0,
         .{ .x = sft.xScale, .y = sft.yScale },
         .{ .x = sft.xOffset, .y = sft.yOffset },
-        @ptrCast([*]u8, image.pixels)[0 .. @intCast(usize, image.width) * @intCast(usize, image.height)],
-        .{ .x = @intCast(i32, image.width), .y = @intCast(i32, image.height) },
-        @intCast(u32, glyph),
+        @as([*]u8, @ptrCast(image.pixels))[0 .. @as(usize, @intCast(image.width)) * @as(usize, @intCast(image.height))],
+        .{ .x = @intCast(image.width), .y = @intCast(image.height) },
+        @intCast(glyph),
     ) catch return -1;
     return 0;
 }
@@ -162,8 +162,8 @@ fn map_file(font: *Font, filename: [*:0]const u8) !void {
             file.handle,
             null,
             win32.PAGE_READONLY,
-            @intCast(u32, 0xffffffff & (file_size >> 32)),
-            @intCast(u32, 0xffffffff & (file_size)),
+            @intCast(0xffffffff & (file_size >> 32)),
+            @intCast(0xffffffff & (file_size)),
             null,
         ) orelse switch (std.os.windows.kernel32.GetLastError()) {
             //.ACCESS_DENIED => return error.PermissionDenied,
@@ -185,7 +185,7 @@ fn map_file(font: *Font, filename: [*:0]const u8) !void {
         };
         font.mem = ptr[0..file_size];
     } else {
-        font.mem = try std.os.mmap(null, file_size, std.os.PROT.READ, std.os.MAP.PRIVATE, file.handle, 0);
+        font.mem = try std.posix.mmap(null, file_size, std.posix.PROT.READ, .{ .TYPE = .PRIVATE }, file.handle, 0);
         std.debug.assert(font.mem.len == file_size);
     }
 }
@@ -195,7 +195,7 @@ fn unmapFile(font: *Font) void {
         std.debug.assert(0 != win32.UnmapViewOfFile(font.memory));
         std.os.windows.CloseHandle(font.mapping.?);
     } else {
-        //std.debug.assert(font.memory != std.os.MAP.FAILED);
-        std.os.munmap(@alignCast(std.mem.page_size, font.mem));
+        //std.debug.assert(font.memory != std.posix.MAP.FAILED);
+        std.posix.munmap(@alignCast(font.mem));
     }
 }
