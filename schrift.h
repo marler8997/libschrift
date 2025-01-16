@@ -72,6 +72,7 @@ struct SFT_Image
 	void *pixels;
 	int   width;
 	int   height;
+	int   stride;
 };
 
 const char *sft_version(void);

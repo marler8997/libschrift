@@ -27,9 +27,11 @@ static int add_glyph(Display *dpy, GlyphSet glyphset, SFT *sft, unsigned long cp
 	if (sft_gmetrics(sft, gid, &mtx) < 0)
 		ABORT(cp, "bad glyph metrics");
 
+	int width = (mtx.minWidth + 3) & ~3;
 	SFT_Image img = {
-		.width  = (mtx.minWidth + 3) & ~3,
+		.width  = width,
 		.height = mtx.minHeight,
+		.stride = width,
 	};
 	size_t total_len = img.width * img.height;
 	char *pixels = malloc(total_len);

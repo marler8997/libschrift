@@ -139,6 +139,7 @@ const win32 = struct {
 
 export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int {
     const font = Font.fromC(sft.font orelse unreachable);
+    std.debug.assert(image.stride >= image.width);
     schrift.render(
         std.heap.c_allocator,
         font.mem,
@@ -147,6 +148,7 @@ export fn sft_render(sft: *c.SFT, glyph: c.SFT_Glyph, image: c.SFT_Image) c_int 
         .{ .x = sft.xScale, .y = sft.yScale },
         .{ .x = sft.xOffset, .y = sft.yOffset },
         @as([*]u8, @ptrCast(image.pixels))[0 .. @as(usize, @intCast(image.width)) * @as(usize, @intCast(image.height))],
+        @as(usize, @intCast(image.stride)),
         .{ .x = @intCast(image.width), .y = @intCast(image.height) },
         @intCast(glyph),
     ) catch return -1;

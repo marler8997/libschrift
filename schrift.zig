@@ -222,12 +222,14 @@ pub fn render(
     scale: XY(Float),
     offset: XY(Float),
     out_pixels: []u8,
+    out_stride: usize,
     out_size: XY(i32),
     glyph: u32,
 ) !void {
     std.debug.assert(out_size.x >= 0);
     std.debug.assert(out_size.y >= 0);
-    std.debug.assert(out_pixels.len == @as(usize, @intCast(out_size.x)) * @as(usize, @intCast(out_size.y)));
+    std.debug.assert(out_stride >= out_size.x);
+    std.debug.assert(out_pixels.len == @as(usize, @intCast(out_stride)) * @as(usize, @intCast(out_size.y)));
 
     const outline_offset = (try getOutlineOffset(ttf_mem, info, glyph)) orelse return;
     const bbox = try getGlyphBbox(ttf_mem, info, scale, offset, outline_offset);
@@ -252,7 +254,7 @@ pub fn render(
     defer outl.deinit(allocator);
 
     try decodeOutline(allocator, ttf_mem, info, outline_offset, 0, &outl);
-    try renderOutline(allocator, &outl, &transform, out_pixels.ptr, out_size);
+    try renderOutline(allocator, &outl, &transform, out_pixels.ptr, out_stride, out_size);
 }
 
 fn readTtf(comptime T: type, ttf_mem: []const u8) T {
@@ -1149,17 +1151,19 @@ fn drawLines(outline: *Outline, buf: Raster) void {
 }
 
 // Integrate the values in the buffer to arrive at the final grayscale image.
-fn postProcess(buf: Raster, image: [*]u8) void {
+fn postProcess(buf: Raster, image: [*]u8, image_stride: usize) void {
     var accum: Float = 0;
-    const num = @as(usize, @intCast(buf.size.x)) * @as(usize, @intCast(buf.size.y));
-    var i: usize = 0;
-    while (i < num) : (i += 1) {
-        const cell = buf.cells[i];
-        var value = @abs(accum + cell.area);
-        value = @min(value, 1.0);
-        value = value * 255.0 + 0.5;
-        image[i] = @intFromFloat(value);
-        accum += cell.cover;
+    for (0..@intCast(buf.size.y)) |row| {
+        const buf_row_offset: usize = row * @as(usize, @intCast(buf.size.x));
+        const image_row_offset: usize = row * image_stride;
+        for (0..@intCast(buf.size.x)) |col| {
+            const cell = buf.cells[buf_row_offset + col];
+            var value = @abs(accum + cell.area);
+            value = @min(value, 1.0);
+            value = value * 255.0 + 0.5;
+            image[image_row_offset + col] = @intFromFloat(value);
+            accum += cell.cover;
+        }
     }
 }
 
@@ -1168,6 +1172,7 @@ fn renderOutline(
     outl: *Outline,
     transform: *const [6]Float,
     pixels: [*]u8,
+    stride: usize,
     size: XY(i32),
 ) !void {
     transformPoints(outl.points.items.ptr[0..outl.points.items.len], transform);
@@ -1202,5 +1207,5 @@ fn renderOutline(
         .size = size,
     };
     drawLines(outl, buf);
-    postProcess(buf, pixels);
+    postProcess(buf, pixels, stride);
 }

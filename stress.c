@@ -73,6 +73,7 @@ main(int argc, char *argv[])
 			image.width  = mtx.minWidth;
 			image.height = mtx.minHeight;
 			image.pixels = malloc((size_t) image.width * (size_t) image.height);
+			image.stride = mtx.minWidth;
 			sft_render(&sft, gid, image);
 			free(image.pixels);
 		}
@@ -80,4 +81,3 @@ main(int argc, char *argv[])
 	sft_freefont(font);
 	return 0;
 }
-
