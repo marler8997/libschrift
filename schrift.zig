@@ -403,7 +403,7 @@ fn cmpu32(a: [*]const u8, b: [*]const u8) i2 {
     return memcmp(a, b, 4);
 }
 
-const GetTableError = error{ TtfBadTables };
+const GetTableError = error{TtfBadTables};
 fn getTable(ttf_mem: []const u8, tag: *const [4]u8) GetTableError!?u32 {
     // No need to bounds-check access to the first 12 bytes - this gets already checked by init_font().
     const num_tables = readTtf(u16, ttf_mem[4..]);
@@ -600,7 +600,7 @@ fn getGlyphBbox(ttf_mem: []const u8, info: TtfInfo, scale: XY(Float), offset: XY
     };
 }
 
-const GetOutlineOffsetError = GetTableError || error {
+const GetOutlineOffsetError = GetTableError || error{
     TtfNoLocaTable,
     TtfBadLocaTable,
     TtfNoGlyfTable,
@@ -809,7 +809,7 @@ fn stackBuf(comptime T: type, comptime stack_len: usize) StackBuf(T, stack_len) 
     return .{};
 }
 
-const SimpleOutlineError = error {
+const SimpleOutlineError = error{
     OutOfMemory,
     TtfTooManyPoints,
     TtfBadOutline,
@@ -895,7 +895,7 @@ fn simpleOutline(
     }
 }
 
-const OutlineError = SimpleOutlineError || error {
+const OutlineError = SimpleOutlineError || error{
     TtfOutlineTooRecursive,
     TtfPointMatchingNotSupported,
     TtfBadTables,

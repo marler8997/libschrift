@@ -93,7 +93,7 @@ export fn sft_lookup(sft: *const c.SFT, codepoint: c.SFT_UChar, glyph: *c.SFT_Gl
 }
 
 export fn sft_gmetrics(sft: *c.SFT, glyph: c.SFT_Glyph, metrics: *c.SFT_GMetrics) c_int {
-    @memset(@as([*]u8, @ptrCast(metrics))[0 .. @sizeOf(c.SFT_GMetrics)], 0);
+    @memset(@as([*]u8, @ptrCast(metrics))[0..@sizeOf(c.SFT_GMetrics)], 0);
 
     const font = Font.fromC(sft.font orelse unreachable);
     const m = schrift.gmetrics(
