@@ -9,3 +9,6 @@ schrift-*.tar.gz
 Debug/
 Release/
 *.obj
+
+zig-out/
+.zig-cache/
