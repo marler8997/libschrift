@@ -194,7 +194,7 @@ fn map_file(font: *Font, filename: [*:0]const u8) !void {
 
 fn unmapFile(font: *Font) void {
     if (builtin.os.tag == .windows) {
-        std.debug.assert(0 != win32.UnmapViewOfFile(font.memory));
+        std.debug.assert(0 != win32.UnmapViewOfFile(font.mem.ptr));
         std.os.windows.CloseHandle(font.mapping.?);
     } else {
         //std.debug.assert(font.memory != std.posix.MAP.FAILED);
