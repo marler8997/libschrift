@@ -15,7 +15,7 @@ pub fn main() !void {
     std.debug.assert(lmetrics.ascender >= 0);
     std.debug.assert(lmetrics.descender <= 0);
     std.debug.assert(lmetrics.line_gap >= 0);
-    const line_gap = @floatToInt(u32, @ceil(lmetrics.line_gap));
+    const line_gap: u32 = @intFromFloat(@ceil(lmetrics.line_gap));
     //const text_height = @intCast(u32, ascent - descent);
     std.log.info(
         "lmetrics: ascent={d:.2} descent={d:.2} gap={d:.2} ({})",
@@ -41,7 +41,7 @@ pub fn main() !void {
         var maybe_prev_gid: ?u32 = null;
         while (it.nextCodepoint()) |c| {
             if (c == '\n') {
-                image_width = std.math.max(image_width, line_width);
+                image_width = @max(image_width, line_width);
                 line_count += 1;
                 line_width = 0;
                 maybe_prev_gid = null;
@@ -62,26 +62,26 @@ pub fn main() !void {
             maybe_prev_gid = gid;
 
             const gmetrics = try schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid);
-            var size = schrift.XY(i32){
-                .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
+            const size = schrift.XY(i32){
+                .x = std.mem.alignForward(i32, gmetrics.min_width, 4),
                 .y = gmetrics.min_height,
             };
 
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
-            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width + kerning.x));
+            const advance_width: u32 = @intFromFloat(@ceil(gmetrics.advance_width + kerning.x));
             line_width += advance_width;
-            max_glyph_width = std.math.max(max_glyph_width, @intCast(u32, size.x));
-            max_glyph_height = std.math.max(max_glyph_height, @intCast(u32, size.y));
+            max_glyph_width = @max(max_glyph_width, @as(u32, @intCast(size.x)));
+            max_glyph_height = @max(max_glyph_height, @as(u32, @intCast(size.y)));
 
-            const top = @floatToInt(i32, @floor(lmetrics.ascender + @intToFloat(Float, gmetrics.y_offset) + kerning.y));
-            const bottom = top + @floatToInt(i32, @ceil(@intToFloat(Float, size.y) + kerning.y));
+            const top: i32 = @intFromFloat(@floor(lmetrics.ascender + @as(Float, @floatFromInt(gmetrics.y_offset)) + kerning.y));
+            const bottom: i32 = top + @as(i32, @intFromFloat(@ceil(@as(Float, @floatFromInt(size.y)) + kerning.y)));
 
-            min_glyph_top = std.math.min(min_glyph_top, top);
-            max_glyph_bottom = std.math.max(max_glyph_bottom, bottom);
+            min_glyph_top = @min(min_glyph_top, top);
+            max_glyph_bottom = @max(max_glyph_bottom, bottom);
         }
     }
 
-    const max_render_height = @intCast(usize, max_glyph_bottom - min_glyph_top);
+    const max_render_height: usize = @intCast(max_glyph_bottom - min_glyph_top);
     std.log.info("min_top={} max_bottom={} height={}", .{ min_glyph_top, max_glyph_bottom, max_render_height });
 
     const image_height = max_render_height * line_count;
@@ -90,7 +90,7 @@ pub fn main() !void {
     const line_stride = image_width * 3;
     const line_buf = try arena.allocator().alloc(u8, max_render_height * line_stride);
     const background = 0x00;
-    std.mem.set(u8, line_buf, background);
+    @memset(line_buf, background);
 
     // defer arena.allocator().free(line_buf);
     const glyph_pixel_buf = try arena.allocator().alloc(u8, max_glyph_width * max_glyph_height);
@@ -110,7 +110,7 @@ pub fn main() !void {
         while (it.nextCodepoint()) |c| {
             if (c == '\n') {
                 try writer.writeAll(line_buf);
-                std.mem.set(u8, line_buf, background);
+                @memset(line_buf, background);
                 x = 0;
                 y += max_render_height;
                 //std.log.info("next line y={}!", .{y});
@@ -129,8 +129,8 @@ pub fn main() !void {
             maybe_prev_gid = gid;
 
             const gmetrics = schrift.gmetrics(font.ttf, font.info, downward, scale, offset, gid) catch unreachable;
-            var size = schrift.XY(i32){
-                .x = std.mem.alignForwardGeneric(i32, gmetrics.min_width, 4),
+            const size = schrift.XY(i32){
+                .x = std.mem.alignForward(i32, gmetrics.min_width, 4),
                 .y = gmetrics.min_height,
             };
 
@@ -140,7 +140,7 @@ pub fn main() !void {
             //std.log.info("   metrics: {} x {}:  {}", .{size.x, size.y, gmetrics});
             // TODO: render directly into our line_buf by enhancing
             //       the API to take a "stride"
-            const pixel_buf_len = @intCast(usize, size.x) * @intCast(usize, size.y);
+            const pixel_buf_len: usize = @as(usize, @intCast(size.x)) * @as(usize, @intCast(size.y));
             try schrift.render(
                 render_arena.allocator(),
                 font.ttf,
@@ -149,26 +149,27 @@ pub fn main() !void {
                 scale,
                 offset,
                 glyph_pixel_buf[0..pixel_buf_len],
+                @intCast(size.x),
                 size,
                 gid,
             );
 
-            const top = @floatToInt(i32, @floor(lmetrics.ascender + @intToFloat(Float, gmetrics.y_offset) + kerning.y));
-            const line_top = @intCast(usize, top - min_glyph_top);
+            const top: i32 = @intFromFloat(@floor(lmetrics.ascender + @as(Float, @floatFromInt(gmetrics.y_offset)) + kerning.y));
+            const line_top: usize = @intCast(top - min_glyph_top);
             //std.log.info("{} {}x{} y_offset={} top={}", .{c, size.x, size.y, gmetrics.y_offset, top});
             copyBox(
-                line_buf[(@floatToInt(usize, @intToFloat(f32, x) + @ceil(kerning.x)) * 3) + (line_stride * line_top) ..],
+                line_buf[(@as(usize, @intFromFloat(@as(f32, @floatFromInt(x)) + @ceil(kerning.x))) * 3) + (line_stride * line_top) ..],
                 line_stride,
                 glyph_pixel_buf.ptr,
-                @intCast(usize, size.x),
-                @intCast(usize, size.y),
+                @intCast(size.x),
+                @intCast(size.y),
             );
             //std.log.info("{} width={} lsb={d:.2} advance={d:.2}", .{
             //    c, size.x,
             //    gmetrics.left_side_bearing,
             //    gmetrics.advance_width,
             //});
-            const advance_width = @floatToInt(u32, @ceil(gmetrics.advance_width + kerning.x));
+            const advance_width: u32 = @intFromFloat(@ceil(gmetrics.advance_width + kerning.x));
             x += advance_width;
         }
     }

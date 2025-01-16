@@ -198,9 +198,9 @@ pub fn kerning(
                     ttf_mem[@intFromPtr(match) - @intFromPtr(ttf_mem.ptr) + 4 ..],
                 );
                 if (flags & ttf.cross_stream_kerning != 0) {
-                    y_shift += @as(Float, value);
+                    y_shift += @floatFromInt(value);
                 } else {
-                    x_shift += @as(Float, value);
+                    x_shift += @floatFromInt(value);
                 }
             }
         }
@@ -209,8 +209,8 @@ pub fn kerning(
     }
 
     return .{
-        .x = x_shift / @as(Float, info.units_per_em) * scale.x,
-        .y = y_shift / @as(Float, info.units_per_em) * scale.y,
+        .x = x_shift / @as(Float, @floatFromInt(info.units_per_em)) * scale.x,
+        .y = y_shift / @as(Float, @floatFromInt(info.units_per_em)) * scale.y,
     };
 }
 

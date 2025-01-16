@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
 
     {
         const exe = b.addExecutable(.{
-            .name = "demo",
+            .name = "demo-c",
             .target = target,
         });
         exe.addCSourceFile(.{
@@ -30,6 +30,18 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("X11");
         exe.linkSystemLibrary("Xrender");
         exe.linkLibC();
+        const install = b.addInstallArtifact(exe, .{});
+        const run = b.addRunArtifact(exe);
+        run.step.dependOn(&install.step);
+        b.step("demo-c", "").dependOn(&run.step);
+    }
+
+    {
+        const exe = b.addExecutable(.{
+            .name = "demo",
+            .root_source_file = b.path("demo.zig"),
+            .target = target,
+        });
         const install = b.addInstallArtifact(exe, .{});
         const run = b.addRunArtifact(exe);
         run.step.dependOn(&install.step);
